@@ -1,4 +1,4 @@
-# manga-viewer
+# manga-translate
 
 일본 만화 이미지 폴더를 로컬 LLM으로 한국어로 번역해, 말풍선을 지우고 한국어를 식자한 이미지를 저장하는 Windows 프로그램입니다.
 검출·OCR·인페인팅·식자는 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator)가, 번역은 로컬
@@ -12,8 +12,6 @@
 - [Git for Windows](https://git-scm.com/download/win)
 
 ## 2. 코드 받기
-
-저장소 이름은 manga-translate로 바뀔 예정이지만, 프로그램 이름(manga-viewer)은 그대로입니다.
 
 ```powershell
 git clone https://github.com/kyj0503/manga-translate.git
@@ -39,7 +37,7 @@ cd manga-translate
 
 ```powershell
 uv sync
-uv run manga-viewer
+uv run manga-translate
 ```
 
 처음 켰을 때 "엔진 설치"를 누르면 BallonsTranslator 전용 Python 환경(CUDA용 PyTorch 포함)과 검출·OCR·인페인팅 모델

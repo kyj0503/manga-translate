@@ -1,4 +1,4 @@
-from manga_viewer.source import list_images
+from manga_translate.source import list_images
 
 
 def touch(path):

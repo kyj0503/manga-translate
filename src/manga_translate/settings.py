@@ -19,7 +19,7 @@ class Settings:
 
 def default_settings_path() -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    return Path(base) / "manga-viewer" / "settings.json"
+    return Path(base) / "manga-translate" / "settings.json"
 
 
 def load_settings(path: Path) -> Settings:

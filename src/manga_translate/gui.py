@@ -22,7 +22,7 @@ from .pipeline import (
 from .settings import Settings, default_settings_path, load_settings, save_settings
 from .winjob import KillOnCloseJob
 
-TITLE = "manga-viewer 번역"
+TITLE = "manga-translate 번역"
 POLL_MS = 100
 NOT_SELECTED = "(선택되지 않음)"
 

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from manga_viewer.engine import EngineLayout
-from manga_viewer.engine_run import (
+from manga_translate.engine import EngineLayout
+from manga_translate.engine_run import (
     CONFIG_SCRIPT,
     collect_results,
     headless_argv,

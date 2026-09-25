@@ -13,7 +13,7 @@ PYTHON = getattr(sys, "_base_executable", sys.executable)
 
 
 def test_close_kills_assigned_process():
-    from manga_viewer.winjob import KillOnCloseJob
+    from manga_translate.winjob import KillOnCloseJob
 
     job = KillOnCloseJob()
     child = subprocess.Popen([PYTHON, "-c", "import time; time.sleep(120)"])

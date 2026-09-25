@@ -1,6 +1,6 @@
 import json
 
-from manga_viewer.settings import Settings, load_settings, save_settings
+from manga_translate.settings import Settings, load_settings, save_settings
 
 
 def test_roundtrip(tmp_path):

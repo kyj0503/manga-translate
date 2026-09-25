@@ -2,17 +2,17 @@ from pathlib import Path
 
 import pytest
 
-import manga_viewer.pipeline as pipeline
-from manga_viewer.engine import ENGINE_COMMIT, EngineLayout
-from manga_viewer.llm.process import ServerStartError
-from manga_viewer.pipeline import PipelineError, TranslationRequest, run_translation, validate
+import manga_translate.pipeline as pipeline
+from manga_translate.engine import ENGINE_COMMIT, EngineLayout
+from manga_translate.llm.process import ServerStartError
+from manga_translate.pipeline import PipelineError, TranslationRequest, run_translation, validate
 
 
 def ready_engine(tmp_path) -> EngineLayout:
     root = tmp_path / "engine"
     (root / ".venv" / "Scripts").mkdir(parents=True, exist_ok=True)
     (root / ".venv" / "Scripts" / "python.exe").write_bytes(b"")
-    (root / ".manga-viewer-setup").write_text(ENGINE_COMMIT, encoding="utf-8")
+    (root / ".manga-translate-setup").write_text(ENGINE_COMMIT, encoding="utf-8")
     return EngineLayout(root)
 
 
@@ -164,7 +164,7 @@ def test_prepare_work_dir_failure_logs_work_dir(tmp_path, fakes, monkeypatch):
 
 
 def test_config_failure_keeps_work_and_logs(tmp_path, fakes, monkeypatch):
-    from manga_viewer.engine import EngineError
+    from manga_translate.engine import EngineError
 
     calls, _, work = fakes
     logs = []

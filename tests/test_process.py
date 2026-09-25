@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_viewer.llm.process import ManagedServer, ServerStartError, free_port
+from manga_translate.llm.process import ManagedServer, ServerStartError, free_port
 
 HELPER = Path(__file__).parent / "helpers" / "fake_health_server.py"
 # The real interpreter, not the venv launcher: terminating a launcher can orphan its child.

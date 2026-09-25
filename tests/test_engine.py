@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from manga_viewer.engine import (
+from manga_translate.engine import (
     ENGINE_COMMIT,
     ENGINE_REPO,
     MODEL_FILES,
@@ -36,7 +36,7 @@ def test_layout_paths(tmp_path):
     layout = EngineLayout(tmp_path)
     assert layout.python == tmp_path / ".venv" / "Scripts" / "python.exe"
     assert layout.config_path == tmp_path / "config" / "config.json"
-    assert layout.marker == tmp_path / ".manga-viewer-setup"
+    assert layout.marker == tmp_path / ".manga-translate-setup"
 
 
 def test_is_ready_needs_matching_marker_and_python(tmp_path):
@@ -198,7 +198,7 @@ def test_download_http_error_is_engine_error(tmp_path, http_server):
 
 
 def test_download_logs_progress(tmp_path, http_server, monkeypatch):
-    import manga_viewer.engine as engine_module
+    import manga_translate.engine as engine_module
 
     monkeypatch.setattr(engine_module, "PROGRESS_EVERY", 1024)
     base, files, _ = http_server
@@ -215,7 +215,7 @@ def test_download_logs_progress(tmp_path, http_server, monkeypatch):
 def test_run_checked_success_and_failure_tail():
     import sys
 
-    from manga_viewer.engine import run_checked
+    from manga_translate.engine import run_checked
 
     run_checked([sys.executable, "-c", "print('fine')"])
     with pytest.raises(EngineError) as info:
@@ -225,9 +225,9 @@ def test_run_checked_success_and_failure_tail():
 
 
 def test_decode_output_handles_cp949_and_utf8(monkeypatch):
-    from manga_viewer.engine import _decode_output
+    from manga_translate.engine import _decode_output
 
-    monkeypatch.setattr("manga_viewer.engine.locale.getpreferredencoding", lambda _: "cp949")
+    monkeypatch.setattr("manga_translate.engine.locale.getpreferredencoding", lambda _: "cp949")
 
     # Test cp949 encoding fallback
     cp949_text = "한글 오류".encode("cp949")

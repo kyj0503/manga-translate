@@ -1,4 +1,4 @@
-"""Runs inside the BallonsTranslator venv (never imported by manga_viewer).
+"""Runs inside the BallonsTranslator venv (never imported by manga_translate).
 
 Writes <engine>/config/config.json for a headless, text-only run against our local llama-server.
 Usage: python bt_write_config.py <engine_root> <base_url> <model_id>
@@ -16,8 +16,8 @@ from ballontranslator.utils.config import pcfg, save_config  # noqa: E402
 from ballontranslator.utils.llm_profiles import THINKING_DISABLED, LLMProfile  # noqa: E402
 
 profile = LLMProfile(
-    id="manga-viewer-llama",
-    name="manga-viewer llama.cpp",
+    id="manga-translate-llama",
+    name="manga-translate llama.cpp",
     base_url=f"{base_url}/v1",
     api_key="sk-no-key-required",
     require_api_key=False,

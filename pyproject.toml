@@ -1,5 +1,5 @@
 [project]
-name = "manga-viewer"
+name = "manga-translate"
 version = "0.1.0"
 description = "Japanese-to-Korean manga translation window using a local LLM and BallonsTranslator"
 readme = "README.md"
@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.gui-scripts]
-manga-viewer = "manga_viewer.gui:main"
+manga-translate = "manga_translate.gui:main"
 
 [dependency-groups]
 dev = [
@@ -24,7 +24,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/manga_viewer"]
+packages = ["src/manga_translate"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

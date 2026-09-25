@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from manga_viewer.llm.llama import LlamaConfig, build_llama_args
+from manga_translate.llm.llama import LlamaConfig, build_llama_args
 
 
 def test_build_llama_args():

@@ -3,7 +3,7 @@ import subprocess
 import sys
 import time
 
-from manga_viewer.winjob import KillOnCloseJob
+from manga_translate.winjob import KillOnCloseJob
 
 job = KillOnCloseJob()
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])

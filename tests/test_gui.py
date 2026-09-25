@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-import manga_viewer.gui as gui
-from manga_viewer.engine import ENGINE_COMMIT, EngineError, EngineLayout
-from manga_viewer.gui import (
+import manga_translate.gui as gui
+from manga_translate.engine import ENGINE_COMMIT, EngineError, EngineLayout
+from manga_translate.gui import (
     build_request,
     default_output_dir,
     engine_layout,
@@ -16,8 +16,8 @@ from manga_viewer.gui import (
     model_label,
     summary_text,
 )
-from manga_viewer.pipeline import PipelineError, TranslationResult
-from manga_viewer.settings import Settings
+from manga_translate.pipeline import PipelineError, TranslationResult
+from manga_translate.settings import Settings
 
 PYTHON = getattr(sys, "_base_executable", sys.executable)
 

@@ -27,7 +27,7 @@ EXTRA_PACKAGES = (
     "httpx[socks,brotli]",
     "tiktoken>=0.7.0",
 )
-SETUP_MARKER = ".manga-viewer-setup"
+SETUP_MARKER = ".manga-translate-setup"
 PROGRESS_EVERY = 50 * 1024 * 1024
 
 
@@ -83,7 +83,7 @@ MODEL_FILES: tuple[ModelFile, ...] = (
 
 def default_engine_dir() -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    return Path(base) / "manga-viewer" / "BallonsTranslator"
+    return Path(base) / "manga-translate" / "BallonsTranslator"
 
 
 @dataclass(frozen=True)

@@ -98,7 +98,7 @@ def run_translation(
 ) -> TranslationResult:
     images = validate(req)
     total = len(images)
-    work = Path(tempfile.mkdtemp(prefix="manga-viewer-"))
+    work = Path(tempfile.mkdtemp(prefix="manga-translate-"))
     exec_dir = work / "pages"
     result_dir = exec_dir / "result"
 
