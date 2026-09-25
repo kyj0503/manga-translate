@@ -41,6 +41,7 @@ class TranslationRequest:
     engine: EngineLayout
     ctx_size: int = 8192
     keep_work: bool = False
+    work_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,9 @@ def run_translation(
 ) -> TranslationResult:
     images = validate(req)
     total = len(images)
-    work = Path(tempfile.mkdtemp(prefix="manga-translate-"))
+    if req.work_root is not None:
+        req.work_root.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="manga-translate-", dir=req.work_root))
     exec_dir = work / "pages"
     result_dir = exec_dir / "result"
 

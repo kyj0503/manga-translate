@@ -1,6 +1,7 @@
 """The app window: install the engine, llama.cpp and the model; translate a folder; stop any of it."""
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import tkinter as tk
@@ -12,7 +13,7 @@ from . import components
 from .download import Cancelled, InstallError
 from .engine import EngineError, EngineLayout, setup_engine
 from .engine_run import run_streaming
-from .paths import AppLayout, app_dir, find_uv
+from .paths import AppLayout, app_dir, find_uv, uv_environment
 from .pipeline import (
     SOURCE_LANGUAGE,
     TARGET_LANGUAGE,
@@ -95,6 +96,7 @@ def build_request(layout: AppLayout, settings: Settings, input_dir: str, output_
         llama_server=layout.llama_server,
         model=model,
         engine=EngineLayout(layout.engine_dir),
+        work_root=layout.work_dir,
     )
 
 
@@ -378,7 +380,9 @@ class App:
 
 
 def main() -> int:
+    layout = AppLayout(app_dir())
+    os.environ.update(uv_environment(layout))  # keep uv's cache and Python inside the program folder
     root = tk.Tk()
-    App(root, AppLayout(app_dir()))
+    App(root, layout)
     root.mainloop()
     return 0

@@ -78,7 +78,7 @@ def fakes(tmp_path, monkeypatch):
             state["on_run"]()
         return state["code"]
 
-    def fake_mkdtemp(prefix=""):
+    def fake_mkdtemp(prefix="", dir=None):
         work.mkdir()
         return str(work)
 
@@ -88,6 +88,23 @@ def fakes(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "run_streaming", fake_run)
     monkeypatch.setattr(pipeline.tempfile, "mkdtemp", fake_mkdtemp)
     return calls, state, work, closed
+
+
+def test_run_translation_creates_work_dir_under_work_root(tmp_path, monkeypatch):
+    recorded = {}
+
+    def fake_mkdtemp(prefix="", dir=None):
+        recorded["dir"] = dir
+        raise SystemExit("stop before doing real work")  # validate already ran; that's all we need
+
+    monkeypatch.setattr(pipeline.tempfile, "mkdtemp", fake_mkdtemp)
+    work_root = tmp_path / "work"
+    req = request(tmp_path, "1.jpg", work_root=work_root)
+
+    with pytest.raises(SystemExit):
+        run_translation(req, on_log=lambda l: None)
+
+    assert recorded["dir"] == work_root
 
 
 def test_validate_rejects_bad_requests(tmp_path):

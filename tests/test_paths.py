@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from manga_translate.paths import APP_HOME_ENV, AppLayout, app_dir, find_uv
+from manga_translate.paths import APP_HOME_ENV, AppLayout, app_dir, find_uv, uv_environment
 
 
 def test_app_dir_defaults_to_the_folder_holding_the_venv():
@@ -21,6 +21,18 @@ def test_layout(tmp_path):
     assert layout.models_dir == tmp_path / "models"
     assert layout.downloads_dir == tmp_path / "downloads"
     assert layout.bundled_uv == tmp_path / "tools" / "uv.exe"
+    assert layout.uv_cache_dir == tmp_path / "downloads" / "uv-cache"
+    assert layout.python_dir == tmp_path / "runtime" / "python"
+    assert layout.work_dir == tmp_path / "work"
+
+
+def test_uv_environment(tmp_path):
+    layout = AppLayout(tmp_path)
+    assert uv_environment(layout) == {
+        "UV_CACHE_DIR": str(tmp_path / "downloads" / "uv-cache"),
+        "UV_PYTHON_INSTALL_DIR": str(tmp_path / "runtime" / "python"),
+        "UV_PYTHON_PREFERENCE": "only-managed",
+    }
 
 
 def test_find_uv_order(tmp_path):

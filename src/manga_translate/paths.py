@@ -51,6 +51,27 @@ class AppLayout:
     def bundled_uv(self) -> Path:
         return self.root / "tools" / "uv.exe"
 
+    @property
+    def uv_cache_dir(self) -> Path:
+        return self.root / "downloads" / "uv-cache"
+
+    @property
+    def python_dir(self) -> Path:
+        return self.root / "runtime" / "python"
+
+    @property
+    def work_dir(self) -> Path:
+        return self.root / "work"
+
+
+def uv_environment(layout: AppLayout) -> dict[str, str]:
+    """Env overrides that keep uv's cache and managed Python inside the program folder."""
+    return {
+        "UV_CACHE_DIR": str(layout.uv_cache_dir),
+        "UV_PYTHON_INSTALL_DIR": str(layout.python_dir),
+        "UV_PYTHON_PREFERENCE": "only-managed",
+    }
+
 
 def find_uv(
     layout: AppLayout,

@@ -99,6 +99,7 @@ def test_build_request(tmp_path, small_model):
     assert req.llama_server == layout.llama_server
     assert req.model == layout.models_dir / "small-model.gguf"
     assert req.engine == EngineLayout(layout.engine_dir)
+    assert req.work_root == layout.work_dir
 
 
 def test_summary_text():
@@ -133,3 +134,11 @@ def test_make_runner_forwards_job():
     job = FakeJob()
     make_runner(lambda line: None, job)([PYTHON, "-c", "pass"])
     assert job.pid is not None
+
+
+def test_make_runner_child_sees_uv_cache_dir_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
+    lines = []
+    run = make_runner(lines.append)
+    run([PYTHON, "-c", "import os; print(os.environ['UV_CACHE_DIR'])"])
+    assert lines == [str(tmp_path / "uv-cache")]
