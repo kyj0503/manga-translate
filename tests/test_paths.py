@@ -24,6 +24,8 @@ def test_layout(tmp_path):
     assert layout.uv_cache_dir == tmp_path / "downloads" / "uv-cache"
     assert layout.python_dir == tmp_path / "runtime" / "python"
     assert layout.work_dir == tmp_path / "work"
+    assert layout.cache_dir == tmp_path / "cache"
+    assert layout.logs_dir == tmp_path / "logs"
 
 
 def test_uv_environment(tmp_path):

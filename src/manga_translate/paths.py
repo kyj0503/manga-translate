@@ -63,6 +63,14 @@ class AppLayout:
     def work_dir(self) -> Path:
         return self.root / "work"
 
+    @property
+    def cache_dir(self) -> Path:
+        return self.root / "cache"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.root / "logs"
+
 
 def uv_environment(layout: AppLayout) -> dict[str, str]:
     """Env overrides that keep uv's cache and managed Python inside the program folder."""
