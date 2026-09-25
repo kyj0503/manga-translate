@@ -6,6 +6,7 @@ crash, Task Manager), so children such as llama-server never outlive the app.
 from __future__ import annotations
 
 import ctypes
+import threading
 from ctypes import wintypes
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -65,6 +66,8 @@ _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 _kernel32.OpenProcess.restype = wintypes.HANDLE
 _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 _kernel32.CloseHandle.restype = wintypes.BOOL
+_kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+_kernel32.TerminateJobObject.restype = wintypes.BOOL
 
 
 class KillOnCloseJob:
@@ -81,21 +84,27 @@ class KillOnCloseJob:
             _kernel32.CloseHandle(handle)
             raise ctypes.WinError(err)
         self._handle = handle
+        self._lock = threading.Lock()
 
     def assign(self, pid: int) -> None:
-        if self._handle is None:
-            raise RuntimeError("job is closed")
+        with self._lock:
+            if self._handle is None:
+                raise RuntimeError("job is closed")
+            handle = self._handle
         process = _kernel32.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, pid)
         if not process:
             raise ctypes.WinError(ctypes.get_last_error())
         try:
-            if not _kernel32.AssignProcessToJobObject(self._handle, process):
+            if not _kernel32.AssignProcessToJobObject(handle, process):
                 raise ctypes.WinError(ctypes.get_last_error())
         finally:
             _kernel32.CloseHandle(process)
 
     def close(self) -> None:
-        """Closing the last handle terminates every assigned process."""
-        if self._handle is not None:
-            _kernel32.CloseHandle(self._handle)
+        """Terminate every assigned process (exit code 1) and close the job handle."""
+        with self._lock:
+            handle = self._handle
             self._handle = None
+        if handle is not None:
+            _kernel32.TerminateJobObject(handle, 1)
+            _kernel32.CloseHandle(handle)

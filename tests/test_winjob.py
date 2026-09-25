@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import psutil
@@ -20,6 +21,31 @@ def test_close_kills_assigned_process():
     job.assign(child.pid)
     job.close()
     child.wait(timeout=10)
+
+
+def test_close_is_safe_from_two_threads_and_twice_sequentially():
+    from manga_translate.winjob import KillOnCloseJob
+
+    job = KillOnCloseJob()
+    errors = []
+
+    def close():
+        try:
+            job.close()
+        except Exception as e:  # pragma: no cover - failure path
+            errors.append(e)
+
+    t1 = threading.Thread(target=close)
+    t2 = threading.Thread(target=close)
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+    assert not errors
+
+    job2 = KillOnCloseJob()
+    job2.close()
+    job2.close()  # must not raise
 
 
 def test_child_dies_when_owner_is_killed():

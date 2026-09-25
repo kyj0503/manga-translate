@@ -1,4 +1,7 @@
+import queue
 import sys
+import threading
+import types
 from pathlib import Path
 
 import pytest
@@ -7,6 +10,7 @@ import manga_translate.components as components
 from manga_translate.components import LLAMA_MARKER, LLAMA_TAG, Asset
 from manga_translate.engine import ENGINE_COMMIT, EngineError, EngineLayout
 from manga_translate.gui import (
+    App,
     build_request,
     can_translate,
     component_status_text,
@@ -20,6 +24,7 @@ from manga_translate.gui import (
 from manga_translate.paths import AppLayout
 from manga_translate.pipeline import PipelineError, TranslationResult
 from manga_translate.settings import Settings
+from manga_translate.winjob import KillOnCloseJob
 
 PYTHON = getattr(sys, "_base_executable", sys.executable)
 
@@ -63,13 +68,21 @@ def test_effective_model_and_status(tmp_path, small_model):
     layout = AppLayout(tmp_path)
     assert effective_model(layout, Settings()) is None
     assert model_status_text(layout, Settings()) == "설치 필요 (약 5GB)"
+
+    mine = tmp_path / "mine.gguf"
+    # chosen file missing and no default installed: no fallback
+    assert effective_model(layout, Settings(model=str(mine))) is None
+    assert model_status_text(layout, Settings(model=str(mine))) == "mine (파일 없음)"
+
     layout.models_dir.mkdir()
     (layout.models_dir / "small-model.gguf").write_bytes(b"123")
     assert effective_model(layout, Settings()) == layout.models_dir / "small-model.gguf"
     assert model_status_text(layout, Settings()) == "small-model (설치됨)"
-    mine = tmp_path / "mine.gguf"
-    assert effective_model(layout, Settings(model=str(mine))) is None
-    assert model_status_text(layout, Settings(model=str(mine))) == "mine (파일 없음)"
+
+    # chosen file missing but the default is installed: fall back to it
+    assert effective_model(layout, Settings(model=str(mine))) == layout.models_dir / "small-model.gguf"
+    assert model_status_text(layout, Settings(model=str(mine))) == "mine (파일 없음, 기본 모델 사용)"
+
     mine.write_bytes(b"x")
     assert effective_model(layout, Settings(model=str(mine))) == mine
     assert model_status_text(layout, Settings(model=str(mine))) == "mine (직접 선택)"
@@ -142,3 +155,49 @@ def test_make_runner_child_sees_uv_cache_dir_env(monkeypatch, tmp_path):
     run = make_runner(lines.append)
     run([PYTHON, "-c", "import os; print(os.environ['UV_CACHE_DIR'])"])
     assert lines == [str(tmp_path / "uv-cache")]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_closing_job_stops_a_running_command_and_raises_engine_error():
+    job = KillOnCloseJob()
+    run = make_runner(lambda line: None, job)
+    errors = []
+
+    def go():
+        try:
+            run([PYTHON, "-c", "import time; time.sleep(60)"])
+        except EngineError as e:
+            errors.append(e)
+        except Exception as e:  # pragma: no cover - unexpected failure path
+            errors.append(e)
+
+    t = threading.Thread(target=go, daemon=True)
+    t.start()
+    t.join(timeout=1)  # let the child process start
+    job.close()
+    t.join(timeout=10)
+    assert not t.is_alive()
+    assert len(errors) == 1 and isinstance(errors[0], EngineError)
+
+
+def test_run_when_cancelled_reports_cancelled_even_on_error():
+    fake_self = types.SimpleNamespace(events=queue.Queue(), cancel=threading.Event())
+    fake_self.cancel.set()
+
+    def work():
+        raise EngineError("x")
+
+    App._run(fake_self, work, "installed")
+
+    assert fake_self.events.get_nowait() == ("cancelled",)
+
+
+def test_run_when_not_cancelled_reports_error():
+    fake_self = types.SimpleNamespace(events=queue.Queue(), cancel=threading.Event())
+
+    def work():
+        raise EngineError("x")
+
+    App._run(fake_self, work, "installed")
+
+    assert fake_self.events.get_nowait() == ("error", "x")

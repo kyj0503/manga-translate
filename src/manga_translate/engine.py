@@ -8,6 +8,7 @@ from __future__ import annotations
 import locale
 import subprocess
 import threading
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -153,7 +154,11 @@ def setup_engine(
         log("엔진 코드를 받는 중...")
         archive = downloads_dir / f"BallonsTranslator-{ENGINE_COMMIT[:12]}.zip"
         fetch(ENGINE_ARCHIVE_URL, archive, None, log=log, cancel=cancel)
-        extract_zip(archive, layout.root, strip_top=True, cancel=cancel)
+        try:
+            extract_zip(archive, layout.root, strip_top=True, cancel=cancel)
+        except zipfile.BadZipFile:
+            archive.unlink(missing_ok=True)
+            raise EngineError("엔진 압축 파일이 손상되었습니다. 다시 설치하면 새로 받습니다.")
         archive.unlink(missing_ok=True)
         log("엔진 Python 패키지를 설치하는 중입니다. 몇 분 걸립니다...")
         if not layout.python.is_file():

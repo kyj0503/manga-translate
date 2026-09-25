@@ -112,6 +112,21 @@ def test_existing_venv_is_kept(tmp_path):
     assert venv_command(layout, UV) not in ran
 
 
+def test_corrupt_archive_is_reported_and_deleted(tmp_path):
+    layout = EngineLayout(tmp_path / "engine")
+    downloads = tmp_path / "downloads"
+
+    def fetch(url, dest, sha256=None, *, log=print, cancel=None):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"not a zip file")
+
+    with pytest.raises(EngineError, match="손상"):
+        setup_engine(layout, uv=UV, downloads_dir=downloads, run=lambda a: None, fetch=fetch, log=lambda m: None)
+
+    archive = downloads / f"BallonsTranslator-{ENGINE_COMMIT[:12]}.zip"
+    assert not archive.exists()
+
+
 def test_cancel_before_start(tmp_path):
     layout = EngineLayout(tmp_path / "engine")
     cancel = threading.Event()

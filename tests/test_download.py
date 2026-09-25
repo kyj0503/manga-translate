@@ -1,4 +1,5 @@
 import hashlib
+import http.client
 import io
 import threading
 import zipfile
@@ -205,6 +206,28 @@ def test_resume_gets_full_body_instead_of_206(tmp_path, server):
     dest.with_name("f.bin.part").write_bytes(b"garbage")
     download(base + "/f.bin", dest, SHA, log=quiet)
     assert dest.read_bytes() == BODY
+
+
+def test_incomplete_read_is_reported(tmp_path, monkeypatch):
+    class FakeResponse:
+        status = 200
+        headers = {"Content-Length": "5120"}
+
+        def read(self, n):
+            raise http.client.IncompleteRead(b"")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(dl.urllib.request, "urlopen", lambda *a, **k: FakeResponse())
+    dest = tmp_path / "f.bin"
+    with pytest.raises(InstallError, match="다운로드"):
+        download("http://example.invalid/f.bin", dest, None, log=quiet)
+    assert not dest.exists()
+    assert dest.with_name("f.bin.part").exists()
 
 
 def test_rename_failure_is_reported(tmp_path, server):

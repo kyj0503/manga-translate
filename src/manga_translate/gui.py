@@ -47,17 +47,22 @@ def component_status_text(ready: bool, size: str) -> str:
 
 
 def effective_model(layout: AppLayout, settings: Settings) -> Path | None:
-    """The GGUF to translate with: the user's pick if set, otherwise the installed default."""
+    """The GGUF to translate with: the user's pick if it exists, else the installed default."""
+    default = components.model_path(layout) if components.model_ready(layout) else None
     if settings.model:
         chosen = Path(settings.model)
-        return chosen if chosen.is_file() else None
-    return components.model_path(layout) if components.model_ready(layout) else None
+        return chosen if chosen.is_file() else default
+    return default
 
 
 def model_status_text(layout: AppLayout, settings: Settings) -> str:
     if settings.model:
         chosen = Path(settings.model)
-        return f"{chosen.stem} (직접 선택)" if chosen.is_file() else f"{chosen.stem} (파일 없음)"
+        if chosen.is_file():
+            return f"{chosen.stem} (직접 선택)"
+        if components.model_ready(layout):
+            return f"{chosen.stem} (파일 없음, 기본 모델 사용)"
+        return f"{chosen.stem} (파일 없음)"
     if components.model_ready(layout):
         return f"{Path(components.MODEL.name).stem} (설치됨)"
     return f"설치 필요 ({MODEL_SIZE})"

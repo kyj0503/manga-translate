@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import shutil
 import threading
 import urllib.error
@@ -104,7 +105,7 @@ def download(
     except urllib.error.HTTPError as e:
         if not (e.code == 416 and start):  # 416 with a .part means it is already complete
             raise InstallError(f"다운로드에 실패했습니다: {url} ({e})") from e
-    except (urllib.error.URLError, OSError) as e:
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
         raise InstallError(f"다운로드에 실패했습니다: {url} ({e})") from e
     if expected is not None and done != expected:
         raise InstallError(f"다운로드가 중간에 끊겼습니다: {dest.name} (다시 설치하면 이어받습니다)")
