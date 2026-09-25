@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 import threading
 from collections import deque
 from pathlib import Path
@@ -15,9 +17,9 @@ from .engine_run import run_streaming
 from .library import Book, is_inside, scan_library
 from .llm.llama import LlamaConfig, start_llama_server
 from .llm.process import ServerStartError
-from .paths import AppLayout, find_uv
+from .paths import AppLayout, app_dir, find_uv, uv_environment
 from .scheduler import Scheduler, process_page
-from .server import ApiError, Response, Route
+from .server import ApiError, Response, Route, make_server
 from .settings import PAGE_DIRECTIONS, Settings, load_settings, save_settings
 from .translate import TranslateError, Translator
 from .winjob import KillOnCloseJob
@@ -26,6 +28,8 @@ from .worker_client import WorkerClient, WorkerError, worker_argv
 logger = logging.getLogger(__name__)
 
 TITLE = "manga-translate"
+WEB_DIR = Path(__file__).parent / "web"
+LOG_FILES = ("app.log", "worker.log", "llama-server.log")
 LANGUAGES = "일본어 → 한국어"
 COMPONENTS = (
     ("engine", "번역 엔진", "약 6GB"),
@@ -424,3 +428,58 @@ def build_routes(state: AppState) -> dict[tuple[str, str], Route]:
         ("POST", "/api/progress"): page(state.save_position),
         ("POST", "/api/settings"): lambda query: state.set_page_direction(query.get("page_direction", "")),
     }
+
+
+class WindowDialogs:
+    """Windows file dialogs owned by the viewer window."""
+
+    def __init__(self) -> None:
+        self.window = None
+
+    def pick_folder(self) -> str | None:
+        import webview
+
+        result = self.window.create_file_dialog(webview.FileDialog.FOLDER)
+        return result[0] if result else None
+
+    def pick_model(self) -> str | None:
+        import webview
+
+        result = self.window.create_file_dialog(webview.FileDialog.OPEN, file_types=("GGUF 모델 (*.gguf)",))
+        return result[0] if result else None
+
+
+def reset_logs(logs_dir: Path) -> None:
+    """Each run starts with fresh logs."""
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    for name in LOG_FILES:
+        (logs_dir / name).unlink(missing_ok=True)
+
+
+def main() -> int:
+    import webview
+
+    layout = AppLayout(app_dir())
+    os.environ.update(uv_environment(layout))  # keep uv's cache and Python inside the program folder
+    reset_logs(layout.logs_dir)
+    logging.basicConfig(
+        filename=str(layout.logs_dir / "app.log"),
+        encoding="utf-8",
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    dialogs = WindowDialogs()
+    state = AppState(layout, dialogs)
+    if state.can_start():
+        state.start()
+    token = secrets.token_urlsafe(24)
+    server = make_server(build_routes(state), token, WEB_DIR)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/?token={token}"
+    dialogs.window = webview.create_window(TITLE, url, width=1280, height=900, min_size=(800, 600))
+    try:
+        webview.start()
+    finally:
+        server.shutdown()
+        state.shutdown()  # closing the Job Objects ends llama-server, the worker and any install
+    return 0

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>manga-translate</title>
+<link rel="stylesheet" href="/static/style.css?token={{TOKEN}}">
+</head>
+<body>
+<section id="setup" hidden>
+  <h1>manga-translate</h1>
+  <p id="setup-languages" class="muted"></p>
+  <table id="components"></table>
+  <div class="actions">
+    <button id="start">시작</button>
+    <button id="cancel">중단</button>
+  </div>
+  <p id="setup-message"></p>
+  <pre id="log"></pre>
+</section>
+
+<section id="library" hidden>
+  <header class="bar">
+    <button id="open-folder">폴더 열기</button>
+    <span id="library-root" class="muted"></span>
+    <span class="spacer"></span>
+    <button id="to-setup">구성 요소</button>
+  </header>
+  <p id="library-empty" class="muted">"폴더 열기"로 만화 폴더를 고르세요. 하위 폴더마다 한 권으로 보여줍니다.</p>
+  <div id="books"></div>
+</section>
+
+<section id="reader" hidden>
+  <header class="bar">
+    <button id="to-library">책장</button>
+    <span id="book-title"></span>
+    <span id="page-number" class="muted"></span>
+    <span id="page-status"></span>
+    <button id="retry" hidden>다시 번역</button>
+    <span class="spacer"></span>
+    <span id="reader-model" class="muted"></span>
+    <span id="reader-languages" class="muted"></span>
+    <label><input type="checkbox" id="overlay-toggle" checked> 번역 표시 (T)</label>
+    <select id="direction">
+      <option value="rtl">일본식 (← 다음)</option>
+      <option value="ltr">서양식 (→ 다음)</option>
+    </select>
+  </header>
+  <main id="stage">
+    <div id="page">
+      <img id="page-image" alt="">
+      <div id="overlay"></div>
+    </div>
+  </main>
+</section>
+
+<script src="/static/app.js?token={{TOKEN}}"></script>
+</body>
+</html>
