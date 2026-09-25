@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import locale
 import os
-import shutil
 import subprocess
 import urllib.error
 import urllib.request
@@ -29,6 +28,7 @@ EXTRA_PACKAGES = (
     "tiktoken>=0.7.0",
 )
 SETUP_MARKER = ".manga-viewer-setup"
+PROGRESS_EVERY = 50 * 1024 * 1024
 
 
 class EngineError(RuntimeError):
@@ -164,8 +164,19 @@ def download_file(url: str, dest: Path, sha256: str | None = None, log: Callable
     part = dest.with_name(dest.name + ".part")
     log(f"다운로드: {dest.name}")
     try:
-        with urllib.request.urlopen(url) as response, part.open("wb") as out:
-            shutil.copyfileobj(response, out, 1024 * 1024)
+        with urllib.request.urlopen(url, timeout=60) as response, part.open("wb") as out:
+            downloaded = 0
+            next_progress = PROGRESS_EVERY
+            chunk_size = min(1024 * 1024, PROGRESS_EVERY)
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                out.write(chunk)
+                downloaded += len(chunk)
+                if downloaded >= next_progress:
+                    log(f"  {dest.name}: {downloaded // (1024 * 1024)}MB")
+                    next_progress += PROGRESS_EVERY
     except (urllib.error.URLError, OSError) as e:
         part.unlink(missing_ok=True)
         raise EngineError(f"다운로드에 실패했습니다: {url} ({e})") from e

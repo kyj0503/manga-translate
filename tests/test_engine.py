@@ -197,6 +197,21 @@ def test_download_http_error_is_engine_error(tmp_path, http_server):
         download_file(base + "/missing", tmp_path / "x.bin", None, log=lambda m: None)
 
 
+def test_download_logs_progress(tmp_path, http_server, monkeypatch):
+    import manga_viewer.engine as engine_module
+
+    monkeypatch.setattr(engine_module, "PROGRESS_EVERY", 1024)
+    base, files, _ = http_server
+    body = b"x" * (3 * 1024)
+    files["/big.bin"] = body
+    dest = tmp_path / "big.bin"
+    messages = []
+    download_file(base + "/big.bin", dest, None, log=messages.append)
+    assert dest.read_bytes() == body
+    progress_lines = [m for m in messages if "MB" in m]
+    assert len(progress_lines) >= 2
+
+
 def test_run_checked_success_and_failure_tail():
     import sys
 

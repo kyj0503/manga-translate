@@ -67,6 +67,20 @@ def test_make_runner_streams_and_raises():
         run([PYTHON, "-c", "import sys; sys.exit(3)"])
 
 
+def test_make_runner_forwards_job():
+    class FakeJob:
+        def __init__(self):
+            self.pid = None
+
+        def assign(self, pid):
+            self.pid = pid
+
+    job = FakeJob()
+    run = make_runner(lambda line: None, job=job)
+    run([PYTHON, "-c", "pass"])
+    assert job.pid is not None
+
+
 def test_build_request_requires_every_choice():
     full = Settings(llama_server="C:/l.exe", model="C:/m.gguf")
     with pytest.raises(PipelineError, match="입력 폴더"):

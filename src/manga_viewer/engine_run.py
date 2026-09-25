@@ -61,7 +61,11 @@ def run_streaming(
     stdin_text: str = "exit\n",
 ) -> int:
     """Run a console program, feed stdin up front, forward its output line by line."""
+    no_proxy = "127.0.0.1,localhost"
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    for key in ("NO_PROXY", "no_proxy"):
+        existing = env.get(key)
+        env[key] = f"{existing},{no_proxy}" if existing else no_proxy
     proc = subprocess.Popen(
         list(argv),
         cwd=cwd,

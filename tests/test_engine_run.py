@@ -100,6 +100,17 @@ def test_run_streaming_returns_exit_code(tmp_path):
     assert run_streaming([PYTHON, "-c", "import sys; sys.exit(9)"], tmp_path, on_line=lambda l: None) == 9
 
 
+def test_run_streaming_sets_no_proxy(tmp_path):
+    lines = []
+    run_streaming(
+        [PYTHON, "-c", "import os; print(os.environ['NO_PROXY'])"],
+        tmp_path,
+        on_line=lines.append,
+    )
+    assert "127.0.0.1" in lines[0]
+    assert "localhost" in lines[0]
+
+
 def test_run_streaming_kills_process_when_consumer_fails(tmp_path):
     def boom(line):
         raise RuntimeError("stop")

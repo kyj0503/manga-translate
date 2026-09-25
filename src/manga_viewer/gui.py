@@ -20,6 +20,7 @@ from .pipeline import (
     run_translation,
 )
 from .settings import Settings, default_settings_path, load_settings, save_settings
+from .winjob import KillOnCloseJob
 
 TITLE = "manga-viewer 번역"
 POLL_MS = 100
@@ -54,11 +55,11 @@ def find_uv(settings: Settings) -> Path | None:
     return Path(found) if found else None
 
 
-def make_runner(on_line: Callable[[str], None]) -> Callable[[Sequence[str]], None]:
+def make_runner(on_line: Callable[[str], None], job: KillOnCloseJob | None = None) -> Callable[[Sequence[str]], None]:
     """Engine setup commands for the window: no console, output goes to the log."""
 
     def run(argv: Sequence[str]) -> None:
-        code = run_streaming(argv, Path.home(), on_line=on_line, stdin_text="")
+        code = run_streaming(argv, Path.home(), job=job, on_line=on_line, stdin_text="")
         if code != 0:
             raise EngineError(f"명령이 실패했습니다 (코드 {code}): {' '.join(map(str, argv))}")
 
@@ -229,14 +230,17 @@ class App:
         def log(line: str) -> None:
             self.events.put(("log", line))
 
+        job = KillOnCloseJob()
         try:
             log(f"엔진 설치 위치: {layout.root}")
-            setup_engine(layout, uv=uv, git=git, run=make_runner(log), log=log)
+            setup_engine(layout, uv=uv, git=git, run=make_runner(log, job), log=log)
             self.events.put(("installed",))
         except EngineError as e:
             self.events.put(("error", str(e)))
         except Exception as e:  # keep the window usable and show what went wrong
             self.events.put(("error", f"예상하지 못한 오류: {e!r}"))
+        finally:
+            job.close()
 
     def _start(self) -> None:
         try:
