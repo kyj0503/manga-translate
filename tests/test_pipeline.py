@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 import pytest
@@ -39,8 +40,9 @@ def request(tmp_path, *names, **overrides) -> TranslationRequest:
 @pytest.fixture
 def fakes(tmp_path, monkeypatch):
     calls = []
-    state = {"produce": None, "code": 0, "start_error": None}
+    state = {"produce": None, "code": 0, "start_error": None, "on_run": None}
     work = tmp_path / "work"
+    closed = threading.Event()
 
     class FakeServer:
         def stop(self):
@@ -49,6 +51,7 @@ def fakes(tmp_path, monkeypatch):
     class FakeJob:
         def close(self):
             calls.append("job.close")
+            closed.set()
 
     def fake_start(cfg, log_path, job=None, timeout=300.0):
         if state["start_error"] is not None:
@@ -71,6 +74,8 @@ def fakes(tmp_path, monkeypatch):
         for name in names:
             (result / f"{Path(name).stem}.png").write_bytes(b"typeset")
             on_line(f"saved {name}")
+        if state["on_run"]:
+            state["on_run"]()
         return state["code"]
 
     def fake_mkdtemp(prefix=""):
@@ -82,7 +87,7 @@ def fakes(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "write_engine_config", fake_config)
     monkeypatch.setattr(pipeline, "run_streaming", fake_run)
     monkeypatch.setattr(pipeline.tempfile, "mkdtemp", fake_mkdtemp)
-    return calls, state, work
+    return calls, state, work, closed
 
 
 def test_validate_rejects_bad_requests(tmp_path):
@@ -94,14 +99,14 @@ def test_validate_rejects_bad_requests(tmp_path):
         validate(request(tmp_path, "1.jpg", input_dir=empty))
     with pytest.raises(PipelineError, match="모델 파일이 없습니다"):
         validate(request(tmp_path, "1.jpg", model=tmp_path / "nope.gguf"))
-    with pytest.raises(PipelineError, match="엔진 설치"):
+    with pytest.raises(PipelineError, match="번역 엔진이 설치되어 있지 않습니다"):
         validate(request(tmp_path, "1.jpg", engine=EngineLayout(tmp_path / "none")))
     with pytest.raises(PipelineError, match="출력 폴더는 입력 폴더와 달라야 합니다"):
         validate(request(tmp_path, "1.jpg", output_dir=tmp_path / "in"))
 
 
 def test_successful_run(tmp_path, fakes):
-    calls, _, work = fakes
+    calls, _, work, _ = fakes
     logs, progress = [], []
     req = request(tmp_path, "1.jpg", "2.png")
 
@@ -119,7 +124,7 @@ def test_successful_run(tmp_path, fakes):
 
 
 def test_missing_pages_keep_work(tmp_path, fakes):
-    _, state, work = fakes
+    _, state, work, _ = fakes
     state["produce"] = ["1.jpg"]
     state["code"] = 9
     progress = []
@@ -135,13 +140,13 @@ def test_missing_pages_keep_work(tmp_path, fakes):
 
 
 def test_keep_work_flag(tmp_path, fakes):
-    _, _, work = fakes
+    _, _, work, _ = fakes
     result = run_translation(request(tmp_path, "1.jpg", keep_work=True), on_log=lambda l: None)
     assert result.ok and result.work_dir == work and work.exists()
 
 
 def test_server_start_failure(tmp_path, fakes):
-    calls, state, _ = fakes
+    calls, state, _, _ = fakes
     state["start_error"] = ServerStartError("no gpu")
     with pytest.raises(PipelineError, match="LLM 서버를 시작하지 못했습니다"):
         run_translation(request(tmp_path, "1.jpg"), on_log=lambda l: None)
@@ -149,7 +154,7 @@ def test_server_start_failure(tmp_path, fakes):
 
 
 def test_prepare_work_dir_failure_logs_work_dir(tmp_path, fakes, monkeypatch):
-    _, _, work = fakes
+    _, _, work, _ = fakes
     logs = []
 
     def failing_prepare(images, exec_dir):
@@ -166,7 +171,7 @@ def test_prepare_work_dir_failure_logs_work_dir(tmp_path, fakes, monkeypatch):
 def test_config_failure_keeps_work_and_logs(tmp_path, fakes, monkeypatch):
     from manga_translate.engine import EngineError
 
-    calls, _, work = fakes
+    calls, _, work, _ = fakes
     logs = []
 
     def failing_config(layout, base_url, model_id, run=None):
@@ -180,3 +185,43 @@ def test_config_failure_keeps_work_and_logs(tmp_path, fakes, monkeypatch):
     assert work.exists()
     assert any(f"작업 폴더: {work}" in log for log in logs)
     assert calls[-2:] == ["server.stop", "job.close"]
+
+
+def test_cancel_during_engine_run_keeps_finished_pages(tmp_path, fakes):
+    calls, state, work, closed = fakes
+    cancel = threading.Event()
+    state["produce"] = ["1.jpg"]
+    state["code"] = -1
+
+    def press_stop():
+        cancel.set()
+        assert closed.wait(5), "the job was not closed after 중단"
+
+    state["on_run"] = press_stop
+    logs = []
+    result = run_translation(request(tmp_path, "1.jpg", "2.png"), on_log=logs.append, cancel=cancel)
+
+    assert result.cancelled and not result.ok
+    assert [p.name for p in result.saved] == ["1.png"]
+    assert (tmp_path / "out" / "1.png").exists()
+    assert result.work_dir is None and not work.exists()
+    assert "번역을 중단했습니다." in logs
+
+
+def test_cancel_before_engine_starts(tmp_path, fakes):
+    calls, _, work, _ = fakes
+    cancel = threading.Event()
+    cancel.set()
+    result = run_translation(request(tmp_path, "1.jpg"), on_log=lambda l: None, cancel=cancel)
+    assert result.cancelled and result.saved == []
+    assert not any(isinstance(c, tuple) and c[0] == "run" for c in calls)
+    assert not work.exists()
+
+
+def test_server_start_failure_after_stop_is_a_cancel(tmp_path, fakes):
+    _, state, _, _ = fakes
+    cancel = threading.Event()
+    cancel.set()
+    state["start_error"] = ServerStartError("killed")
+    result = run_translation(request(tmp_path, "1.jpg"), on_log=lambda l: None, cancel=cancel)
+    assert result.cancelled
