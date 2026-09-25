@@ -28,6 +28,8 @@ NOT_SELECTED = "(선택되지 않음)"
 
 
 def default_output_dir(input_dir: Path) -> Path:
+    if not input_dir.name:
+        return input_dir / "번역"
     return input_dir.with_name(f"{input_dir.name}_번역")
 
 
@@ -44,7 +46,7 @@ def engine_layout(settings: Settings) -> EngineLayout:
 
 
 def engine_status_text(layout: EngineLayout) -> str:
-    return "설치됨" if layout.is_ready() else "설치 필요 (약 1GB 다운로드, 몇 분 걸림)"
+    return "설치됨" if layout.is_ready() else "설치 필요 (약 6GB 다운로드, 수십 분 걸릴 수 있음)"
 
 
 def find_uv(settings: Settings) -> Path | None:
@@ -90,6 +92,8 @@ def summary_text(result: TranslationResult, output_dir: Path) -> str:
         lines.append("결과가 없는 페이지: " + ", ".join(p.name for p in result.missing))
     if result.work_dir is not None:
         lines.append(f"작업 폴더: {result.work_dir}")
+    if result.engine_exit_code != 0:
+        lines.append(f"엔진이 오류로 끝났습니다 (코드 {result.engine_exit_code}). 로그를 확인하세요.")
     return "\n".join(lines)
 
 

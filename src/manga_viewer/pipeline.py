@@ -101,7 +101,6 @@ def run_translation(
     work = Path(tempfile.mkdtemp(prefix="manga-viewer-"))
     exec_dir = work / "pages"
     result_dir = exec_dir / "result"
-    prepare_work_dir(images, exec_dir)
 
     last = -1
 
@@ -121,6 +120,7 @@ def run_translation(
     report(0)
     code = None
     try:
+        prepare_work_dir(images, exec_dir)
         with _llama_server(req, work / "llama-server.log", on_log) as (job, base_url):
             on_log("번역 설정을 쓰는 중...")
             write_engine_config(req.engine, base_url, req.model.stem)

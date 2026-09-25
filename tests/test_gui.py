@@ -26,6 +26,10 @@ def test_default_output_dir():
     assert default_output_dir(Path("D:/만화/1권")) == Path("D:/만화/1권_번역")
 
 
+def test_default_output_dir_at_drive_root():
+    assert default_output_dir(Path("D:/")) == Path("D:/번역")
+
+
 def test_format_progress():
     assert format_progress(0, 0) == "대기 중"
     assert format_progress(3, 6) == "3 / 6장"
@@ -109,3 +113,4 @@ def test_summary_text():
     assert "1 / 2장을 번역했습니다." in text
     assert "결과가 없는 페이지: 2.png" in text
     assert "작업 폴더: C:\\tmp\\w" in text
+    assert "엔진이 오류로 끝났습니다 (코드 9). 로그를 확인하세요." in text

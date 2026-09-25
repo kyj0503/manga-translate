@@ -148,6 +148,21 @@ def test_server_start_failure(tmp_path, fakes):
     assert calls == ["job.close"]
 
 
+def test_prepare_work_dir_failure_logs_work_dir(tmp_path, fakes, monkeypatch):
+    _, _, work = fakes
+    logs = []
+
+    def failing_prepare(images, exec_dir):
+        raise OSError("copy failed")
+
+    monkeypatch.setattr(pipeline, "prepare_work_dir", failing_prepare)
+
+    with pytest.raises(OSError, match="copy failed"):
+        run_translation(request(tmp_path, "1.jpg"), on_log=logs.append)
+
+    assert any(f"작업 폴더: {work}" in log for log in logs)
+
+
 def test_config_failure_keeps_work_and_logs(tmp_path, fakes, monkeypatch):
     from manga_viewer.engine import EngineError
 
