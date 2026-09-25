@@ -15,15 +15,12 @@ A 폴더의 일본 만화 이미지를 한국어로 번역·식자한 이미지�
 
 ## 2. 사용법
 
-```
-manga-viewer setup [--engine-dir <경로>] [--uv <uv.exe>]
-manga-viewer translate <A폴더> <B폴더> --llama-server <exe> --model <gguf> [--engine-dir <경로>] [--ctx-size N] [--keep-work]
-```
+**창(GUI)만 제공한다. CLI는 두지 않는다**(사용자 결정, 2026-09-25). `uv run manga-viewer`(또는 `python -m manga_viewer`)로 창을 연다.
 
-- `--engine-dir` 기본값: `%LOCALAPPDATA%\manga-viewer\BallonsTranslator`
-- `--uv` 기본값: PATH의 `uv`
+- 엔진 기본 위치: `%LOCALAPPDATA%\manga-viewer\BallonsTranslator` (`settings.json`의 `engine_dir`로 바꿀 수 있음)
+- uv: PATH의 `uv`, 없으면 창이 `uv.exe` 위치를 묻는다.
 
-## 3. setup
+## 3. 엔진 설치 (창의 "엔진 설치" 버튼)
 
 1. 엔진 저장소를 고정 커밋 `3e401b29f72bc0b3cdad5a4d1c7fa9c6033cdcd8`(https://github.com/dmMaze/BallonsTranslator)로 받는다.
    폴더가 없으면 `git init` + `remote add` 후 해당 커밋을 fetch·checkout한다. 이미 있으면 fetch·checkout만 한다.
@@ -39,9 +36,9 @@ manga-viewer translate <A폴더> <B폴더> --llama-server <exe> --model <gguf> [
 4. 끝나면 `<engine>\.manga-viewer-setup`에 커밋 해시를 기록한다. 이 파일과 venv Python이 있으면 "설치됨"으로 본다.
 5. 다시 실행해도 안전하다(패키지 설치는 설치됨 상태면 건너뛰고, 모델은 검증 후 건너뜀).
 
-## 4. translate
+## 4. 번역 (창의 "번역 시작" 버튼)
 
-1. 입력 검증: A 폴더와 이미지 존재, llama-server·모델 파일 존재, 엔진 설치됨, A와 B가 다름. 실패하면 한국어 안내와 종료 코드 2.
+1. 입력 검증: A 폴더와 이미지 존재, llama-server·모델 파일 존재, 엔진 설치됨, A와 B가 다름. 실패하면 한국어 안내를 대화상자로 보여준다.
 2. A의 이미지(`.jpg .jpeg .png .webp .bmp`, 하위 폴더 제외)를 임시 작업 폴더(`%TEMP%\manga-viewer-*\pages`)에 복사한다.
    엔진이 입력 폴더 안에 작업 파일을 만들기 때문에 A는 건드리지 않는다.
 3. llama-server를 빈 포트, `127.0.0.1`, `--reasoning-budget 0`(추론 모드 끔)으로 띄운다. Job Object로 수명을 묶는다.
@@ -52,8 +49,8 @@ manga-viewer translate <A폴더> <B폴더> --llama-server <exe> --model <gguf> [
 5. 엔진을 `-m ballontranslator --headless --exec_dirs <작업 폴더>`로 실행한다(작업 디렉터리는 엔진 루트, `PYTHONIOENCODING=utf-8`).
    표준 입력에 미리 `exit`를 넣어 두어 끝나면 스스로 종료하게 한다. 출력은 터미널에 그대로 보여준다. 엔진 프로세스도 같은 Job에 넣는다.
 6. `<작업 폴더>\result\`의 파일을 B로 복사한다. 입력 이미지마다 같은 이름(확장자 무관)의 결과가 있는지 확인한다.
-7. 요약을 출력한다. 모든 페이지 결과가 있으면 종료 코드 0이고 작업 폴더를 지운다. 빠진 페이지가 있으면 목록을 출력하고
-   종료 코드 1, 작업 폴더는 원인 확인용으로 남긴다(`--keep-work`면 항상 남긴다).
+7. 요약 대화상자를 띄운다. 모든 페이지 결과가 있으면 작업 폴더를 지운다. 빠진 페이지가 있으면 목록을 보여주고
+   작업 폴더는 원인 확인용으로 남긴다.
 8. 어떤 경우든 엔진 프로세스와 llama-server를 종료한다.
 
 ## 4-1. GUI (간단한 창)
@@ -68,9 +65,8 @@ manga-viewer translate <A폴더> <B폴더> --llama-server <exe> --model <gguf> [
 - 끝나면 결과 요약 대화상자를 띄운다. 엔진이 설치되지 않았으면 `manga-viewer setup`을 먼저 실행하라고 안내한다.
 - 선택한 경로(모델, llama-server, 엔진 폴더, 마지막 입출력 폴더)는 `%LOCALAPPDATA%\manga-viewer\settings.json`에 저장한다.
 - 번역 중에 창을 닫으면 확인을 받고, 닫으면 Job Object 덕분에 엔진과 llama-server가 함께 종료된다.
-- 실행: `manga-viewer gui` 또는 콘솔 창 없는 `manga-viewer-gui`.
-
-번역 흐름은 CLI와 GUI가 같은 `pipeline.py`를 쓴다.
+- 번역 엔진 상태("설치됨" / "설치 필요")와 "엔진 설치" 버튼. 설치 로그도 같은 로그 영역에 보인다.
+- 창에서 실행하는 하위 명령(엔진 설정·설치)은 콘솔 창을 띄우지 않는다.
 
 ## 5. 코드 구성
 
@@ -85,7 +81,7 @@ manga-viewer translate <A폴더> <B폴더> --llama-server <exe> --model <gguf> [
 | `pipeline.py` (신규) | 번역 작업 하나: 입력 검증, llama-server·엔진 실행, 진행도, 결과 수집 |
 | `settings.py` (신규) | GUI 설정 저장·불러오기 |
 | `gui.py` (신규) | tkinter 창 |
-| `cli.py` | `setup`, `translate`, `gui` |
+| `__main__.py` | `python -m manga_viewer`로 창 실행 |
 
 자체 파이프라인 코드(mokuro 비전, 번역기, bench, 렌더러 등)와 PyTorch `engine` extra는 제거한다(git 기록에 남음).
 저장소에 GPL-3.0 `LICENSE`와 짧은 사용법 `README.md`를 둔다.
@@ -95,7 +91,8 @@ manga-viewer translate <A폴더> <B폴더> --llama-server <exe> --model <gguf> [
 - 설치 명령 구성, 설치 여부 판정, 모델 다운로드(로컬 HTTP 서버로 체크섬 성공·실패·건너뜀)
 - 설정 스크립트: 가짜 `ballontranslator` 패키지로 실행해 저장된 설정값 검증
 - 스트리밍 실행: 실제 하위 프로세스로 출력 전달·표준 입력 `exit`·오류 시 종료 확인
-- CLI: 가짜 llama-server·엔진으로 정상·일부 실패·입력 오류 흐름
+- 번역 흐름(`pipeline.py`): 가짜 llama-server·엔진으로 정상·일부 실패·입력 오류와 진행도
+- 창: 화면 없이 검증 가능한 도우미 함수(출력 폴더 기본값, 진행 문구, 요청 만들기, 요약 문구, 설정 저장)
 - 실제 확인: 평가 때 설치한 `.dev\BallonsTranslator`에 `setup`을 다시 실행해 멱등성을 확인하고, 샘플 6장을 E4B로 번역
 
 ## 7. 보류 (다음 단계)

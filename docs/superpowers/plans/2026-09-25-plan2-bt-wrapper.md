@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `manga-viewer setup`으로 BallonsTranslator 엔진과 모델을 설치하고, `manga-viewer translate A B` 또는 간단한 창(`manga-viewer gui`)으로 로컬 llama-server(Gemma 4, 텍스트 전용)를 띄워 엔진을 headless로 실행해 번역·식자된 이미지를 B에 저장한다. 창에는 입출력 폴더, 선택된 모델, 입출력 언어, 진행도가 보인다.
+**Goal:** 간단한 창(GUI)에서 입력·출력 폴더를 고르고, 선택된 모델과 입출력 언어를 보며 진행도를 확인하면서 만화를 번역한다. 창은 BallonsTranslator 엔진을 설치하고("엔진 설치"), 로컬 llama-server(Gemma 4, 텍스트 전용)를 띄워 엔진을 headless로 실행해 결과 이미지를 출력 폴더에 저장한다. CLI는 두지 않는다.
 
 **Architecture:** 엔진(BallonsTranslator)은 자체 venv를 가진 별도 설치물이다. 우리 CLI는 (1) `engine.py`로 설치·검증하고, (2) `engine_run.py`로 엔진 venv에서 설정 스크립트를 실행해 `config.json`을 쓰고, 작업 폴더에 페이지를 복사해 headless 실행을 스트리밍하고 결과를 모은다. llama-server와 엔진 프로세스는 같은 Job Object에 묶는다. 계획 1의 자체 파이프라인 코드는 마지막 태스크에서 제거한다.
 
@@ -17,7 +17,7 @@
 - 엔진 기본 위치 `%LOCALAPPDATA%\manga-viewer\BallonsTranslator`, 설치 표시 파일 `<engine>\.manga-viewer-setup`(내용: 커밋 해시).
 - 번역은 텍스트 전용: LLM 프로필 `support_vision=False`, `llm_translate_vision=False`. mmproj를 쓰지 않는다.
 - llama-server는 `127.0.0.1`에만 바인딩하고 `--reasoning-budget 0`으로 추론을 끈다.
-- 사용자에게 보이는 CLI 문구는 한국어. 입력 오류 종료 코드 2, 빠진 페이지가 있으면 1, 모두 성공 0.
+- 사용자에게 보이는 문구는 한국어. CLI는 두지 않는다(창만). 창에서 실행되는 하위 명령은 콘솔 창을 띄우지 않는다.
 - 엔진 모듈(`ballontranslator`)은 우리 프로세스에서 절대 import하지 않는다. 엔진 venv의 Python으로 실행되는 스크립트에서만 쓴다.
 - 샘플(`manga-data/`), 모델·엔진(`.dev/`), 결과(`bench-out/`)는 커밋하지 않는다.
 - 커밋 작성자 이메일은 repo-local `heroria0503@gmail.com`. 커밋 메시지 끝에 빈 줄 + `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -26,6 +26,20 @@
 
 | 파일 | 변경 | 책임 |
 |---|---|---|
+| `src/manga_viewer/engine.py` | 신규 | 엔진 위치·설치 명령·모델 다운로드·설치 여부, 창 없는 명령 실행 |
+| `src/manga_viewer/engine_run.py` | 신규 | 설정 쓰기, 작업 폴더, headless 스트리밍 실행, 결과 수집 |
+| `src/manga_viewer/scripts/bt_write_config.py` | 신규 | 엔진 venv에서만 실행되는 설정 스크립트 |
+| `src/manga_viewer/llm/llama.py` | 수정 | mmproj 제거, `--reasoning-budget 0` |
+| `src/manga_viewer/pipeline.py` | 신규 | 번역 작업 하나(검증, 실행, 진행도, 결과) |
+| `src/manga_viewer/settings.py` | 신규 | 창 설정 저장 |
+| `src/manga_viewer/gui.py`, `src/manga_viewer/__main__.py` | 신규 | tkinter 창, `python -m manga_viewer` |
+| `tests/test_engine.py`, `tests/test_engine_run.py`, `tests/test_pipeline.py`, `tests/test_settings.py`, `tests/test_gui.py` | 신규 | |
+| `tests/helpers/fake_bt/ballontranslator/...` | 신규 | 설정 스크립트 테스트용 가짜 엔진 패키지 |
+| `tests/test_llama.py`, `tests/test_imports.py` | 수정·교체 | |
+| `src/manga_viewer/cli.py`와 자체 파이프라인 모듈, 그 테스트 | 삭제 | Task 5 |
+| `pyproject.toml`, `LICENSE`, `README.md` | 수정·신규 | Task 5 |
+
+---|---|---|
 | `src/manga_viewer/engine.py` | 신규 | 엔진 위치·설치 명령·모델 다운로드·설치 여부 |
 | `src/manga_viewer/engine_run.py` | 신규 | 설정 쓰기, 작업 폴더, headless 스트리밍 실행, 결과 수집 |
 | `src/manga_viewer/scripts/bt_write_config.py` | 신규 | 엔진 venv에서만 실행되는 설정 스크립트 |
@@ -849,22 +863,23 @@ git commit -m "feat: write engine config, stage pages and run BallonsTranslator 
 
 ---
 
-### Task 3: 번역 작업 흐름 (`pipeline.py`)과 llama-server 옵션
+### Task 3: 번역 작업 흐름 (`pipeline.py`), llama-server 옵션, 창 없는 명령 실행
 
 **Files:**
 - Create: `src/manga_viewer/pipeline.py`
-- Modify: `src/manga_viewer/llm/llama.py`, `tests/test_llama.py`
+- Modify: `src/manga_viewer/llm/llama.py`, `src/manga_viewer/engine.py` (`run_checked`만), `tests/test_llama.py`, `tests/test_engine.py`
 - Test: `tests/test_pipeline.py`
 
 **Interfaces:**
-- Consumes: Task 1 `EngineLayout`; Task 2 `write_engine_config`, `headless_argv`, `prepare_work_dir`, `run_streaming`, `collect_results`, `missing_pages`; 기존 `start_llama_server`, `LlamaConfig`, `ServerStartError`, `KillOnCloseJob`, `list_images`
+- Consumes: Task 1 `EngineLayout`, `EngineError`; Task 2 `write_engine_config`, `headless_argv`, `prepare_work_dir`, `run_streaming`, `collect_results`, `missing_pages`; 기존 `start_llama_server`, `LlamaConfig`, `ServerStartError`, `KillOnCloseJob`, `list_images`
 - Produces:
   - `LlamaConfig(exe, model, ctx_size=8192, n_gpu_layers=999)` (mmproj 없음), `build_llama_args`가 `--reasoning-budget 0` 포함
+  - `run_checked(argv)`: 콘솔 창 없이 실행하고 출력을 모은다. 실패하면 마지막 10줄을 담은 `EngineError`
   - `SOURCE_LANGUAGE = "일본어"`, `TARGET_LANGUAGE = "한국어"`
   - `class PipelineError(Exception)` — 사용자에게 보여줄 한국어 메시지
   - `@dataclass(frozen=True) TranslationRequest(input_dir: Path, output_dir: Path, llama_server: Path, model: Path, engine: EngineLayout, ctx_size: int = 8192, keep_work: bool = False)`
   - `@dataclass(frozen=True) TranslationResult(total: int, saved: list[Path], missing: list[Path], engine_exit_code: int, work_dir: Path | None)` with property `ok -> bool` (`not missing`). `work_dir`는 남긴 경우만 경로, 지웠으면 `None`.
-  - `validate(req) -> list[Path]` — 입력 이미지 목록, 문제가 있으면 `PipelineError`
+  - `validate(req) -> list[Path]` — 입력 이미지 목록, 문제가 있으면 `PipelineError`. 엔진이 없으면 창의 "엔진 설치" 버튼을 안내한다.
   - `run_translation(req, *, on_log=print, on_progress=lambda done, total: None) -> TranslationResult` — 진행은 (0, total)로 시작해 `result\` 파일 수가 바뀔 때마다, 마지막에 저장된 장수로 보고한다. 같은 값은 두 번 보고하지 않는다.
 
 - [ ] **Step 1: 실패하는 테스트 작성**
@@ -890,6 +905,21 @@ def test_build_llama_args():
     assert "--parallel 1" in joined
     assert "--reasoning-budget 0" in joined
     assert "--mmproj" not in args
+```
+
+`tests/test_engine.py` 끝에 추가:
+
+```python
+def test_run_checked_success_and_failure_tail():
+    import sys
+
+    from manga_viewer.engine import run_checked
+
+    run_checked([sys.executable, "-c", "print('fine')"])
+    with pytest.raises(EngineError) as info:
+        run_checked([sys.executable, "-c", "import sys; print('boom'); sys.exit(3)"])
+    assert "코드 3" in str(info.value)
+    assert "boom" in str(info.value)
 ```
 
 `tests/test_pipeline.py`:
@@ -991,7 +1021,7 @@ def test_validate_rejects_bad_requests(tmp_path):
         validate(request(tmp_path, "1.jpg", input_dir=empty))
     with pytest.raises(PipelineError, match="모델 파일이 없습니다"):
         validate(request(tmp_path, "1.jpg", model=tmp_path / "nope.gguf"))
-    with pytest.raises(PipelineError, match="manga-viewer setup"):
+    with pytest.raises(PipelineError, match="엔진 설치"):
         validate(request(tmp_path, "1.jpg", engine=EngineLayout(tmp_path / "none")))
     with pytest.raises(PipelineError, match="출력 폴더는 입력 폴더와 달라야 합니다"):
         validate(request(tmp_path, "1.jpg", output_dir=tmp_path / "in"))
@@ -1047,8 +1077,8 @@ def test_server_start_failure(tmp_path, fakes):
 
 - [ ] **Step 2: 실패 확인**
 
-Run: `& $uv run pytest tests/test_llama.py tests/test_pipeline.py -v`
-Expected: FAIL (`--reasoning-budget` 없음, `ModuleNotFoundError: No module named 'manga_viewer.pipeline'`)
+Run: `& $uv run pytest tests/test_llama.py tests/test_engine.py tests/test_pipeline.py -v`
+Expected: FAIL (`--reasoning-budget` 없음, `run_checked` 출력 꼬리 없음, `ModuleNotFoundError: No module named 'manga_viewer.pipeline'`)
 
 - [ ] **Step 3: `llama.py` 수정**
 
@@ -1076,10 +1106,24 @@ def build_llama_args(cfg: LlamaConfig, port: int) -> list[str]:
     ]
 ```
 
-- [ ] **Step 4: `pipeline.py` 작성**
+- [ ] **Step 4: `engine.run_checked` 교체**
+
+GUI는 콘솔이 없는 프로그램이므로, 하위 명령이 콘솔 창을 띄우지 않게 하고 실패 원인을 오류 메시지에 담는다.
 
 ```python
-"""One translation job shared by the CLI and the GUI: validate, run llama-server + engine, collect results."""
+def run_checked(argv: Sequence[str]) -> None:
+    """Run a helper command without a console window; on failure show the end of its output."""
+    result = subprocess.run(list(argv), capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode != 0:
+        output = (result.stdout + result.stderr).decode("utf-8", errors="replace").strip()
+        tail = "\n".join(output.splitlines()[-10:])
+        raise EngineError(f"명령이 실패했습니다 (코드 {result.returncode}): {' '.join(map(str, argv))}\n{tail}")
+```
+
+- [ ] **Step 5: `pipeline.py` 작성**
+
+```python
+"""One translation job for the GUI: validate, run llama-server + engine, report progress, collect results."""
 from __future__ import annotations
 
 import shutil
@@ -1145,7 +1189,7 @@ def validate(req: TranslationRequest) -> list[Path]:
         if not path.is_file():
             raise PipelineError(f"{label} 파일이 없습니다: {path}")
     if not req.engine.is_ready():
-        raise PipelineError("번역 엔진이 설치되어 있지 않습니다. 먼저 'manga-viewer setup'을 실행하세요.")
+        raise PipelineError("번역 엔진이 설치되어 있지 않습니다. '엔진 설치' 버튼을 먼저 눌러 주세요.")
     if req.output_dir.resolve() == req.input_dir.resolve():
         raise PipelineError("출력 폴더는 입력 폴더와 달라야 합니다.")
     return images
@@ -1215,297 +1259,36 @@ def run_translation(
     return TranslationResult(total, saved, missing, code, work if keep else None)
 ```
 
-- [ ] **Step 5: 통과 확인**
+- [ ] **Step 6: 통과 확인**
 
-Run: `& $uv run pytest tests/test_llama.py tests/test_pipeline.py -v`
-Expected: 6 passed
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/manga_viewer/llm/llama.py src/manga_viewer/pipeline.py tests/test_llama.py tests/test_pipeline.py
-git commit -m "feat: add the shared translation pipeline around BallonsTranslator"
-```
-
----
-
-### Task 4: CLI (`setup`, `translate`, `gui`)
-
-**Files:**
-- Replace: `src/manga_viewer/cli.py`, `tests/test_cli.py`
-
-**Interfaces:**
-- Consumes: Task 1 `EngineError`, `EngineLayout`, `default_engine_dir`, `setup_engine`; Task 3 `PipelineError`, `TranslationRequest`, `TranslationResult`, `run_translation`; Task 5에서 만들 `manga_viewer.gui.main`(`gui` 하위 명령에서 호출 시점에 import)
-- Produces: `cli.main(argv=None) -> int`, `cli.CliError`
-
-- [ ] **Step 1: 실패하는 테스트 작성**
-
-`tests/test_cli.py` 전체 교체:
-
-```python
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-import pytest
-
-import manga_viewer.cli as cli
-from manga_viewer.cli import main
-from manga_viewer.pipeline import PipelineError, TranslationResult
-
-
-def translate_args(tmp_path, *extra):
-    return ["translate", str(tmp_path / "in"), str(tmp_path / "out"),
-            "--llama-server", "llama-server.exe", "--model", "m.gguf", *extra]
-
-
-def test_translate_requires_model_args(tmp_path):
-    with pytest.raises(SystemExit):
-        main(["translate", str(tmp_path), str(tmp_path / "out")])
-
-
-def test_translate_builds_request_and_prints_summary(tmp_path, monkeypatch, capsys):
-    seen = {}
-
-    def fake_run(req, *, on_log, on_progress):
-        seen["req"] = req
-        on_progress(1, 2)
-        return TranslationResult(2, [tmp_path / "out" / "1.png", tmp_path / "out" / "2.png"], [], 0, None)
-
-    monkeypatch.setattr(cli, "run_translation", fake_run)
-    code = main(translate_args(tmp_path, "--engine-dir", str(tmp_path / "engine"), "--ctx-size", "4096", "--keep-work"))
-
-    out = capsys.readouterr().out
-    assert code == 0
-    req = seen["req"]
-    assert req.input_dir == tmp_path / "in" and req.output_dir == tmp_path / "out"
-    assert req.model == Path("m.gguf") and req.llama_server == Path("llama-server.exe")
-    assert req.engine.root == tmp_path / "engine"
-    assert req.ctx_size == 4096 and req.keep_work is True
-    assert "진행: 1/2" in out
-    assert "2/2장 저장" in out
-
-
-def test_translate_reports_missing_pages(tmp_path, monkeypatch, capsys):
-    result = TranslationResult(2, [tmp_path / "out" / "1.png"], [tmp_path / "in" / "2.png"], 9, tmp_path / "work")
-    monkeypatch.setattr(cli, "run_translation", lambda req, **kw: result)
-    assert main(translate_args(tmp_path)) == 1
-    out = capsys.readouterr().out
-    assert "결과 없음: 2.png" in out
-    assert "엔진 종료 코드: 9" in out
-    assert f"작업 폴더: {tmp_path / 'work'}" in out
-
-
-def test_pipeline_error_is_exit_code_2(tmp_path, monkeypatch, capsys):
-    def fail(req, **kw):
-        raise PipelineError("이미지가 없습니다: x")
-
-    monkeypatch.setattr(cli, "run_translation", fail)
-    assert main(translate_args(tmp_path)) == 2
-    assert "이미지가 없습니다" in capsys.readouterr().out
-
-
-def test_default_engine_dir_is_used(tmp_path, monkeypatch):
-    seen = {}
-    monkeypatch.setattr(cli, "default_engine_dir", lambda: tmp_path / "default-engine")
-    monkeypatch.setattr(cli, "run_translation", lambda req, **kw: seen.setdefault("req", req) and TranslationResult(0, [], [], 0, None))
-    main(translate_args(tmp_path))
-    assert seen["req"].engine.root == tmp_path / "default-engine"
-
-
-def test_setup_without_uv(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
-    assert main(["setup", "--engine-dir", str(tmp_path / "engine")]) == 2
-    assert "uv를 찾을 수 없습니다" in capsys.readouterr().out
-
-
-def test_setup_without_git(tmp_path, monkeypatch, capsys):
-    uv = tmp_path / "uv.exe"
-    uv.write_bytes(b"")
-    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
-    assert main(["setup", "--engine-dir", str(tmp_path / "engine"), "--uv", str(uv)]) == 2
-    assert "git을 찾을 수 없습니다" in capsys.readouterr().out
-
-
-def test_setup_calls_engine_setup(tmp_path, monkeypatch):
-    uv = tmp_path / "uv.exe"
-    uv.write_bytes(b"")
-    seen = {}
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "C:/git/git.exe" if name == "git" else None)
-    monkeypatch.setattr(cli, "setup_engine", lambda layout, uv, git: seen.update(root=layout.root, uv=uv, git=git))
-    assert main(["setup", "--engine-dir", str(tmp_path / "engine"), "--uv", str(uv)]) == 0
-    assert seen == {"root": tmp_path / "engine", "uv": uv, "git": Path("C:/git/git.exe")}
-
-
-def test_gui_subcommand_launches_window(monkeypatch):
-    import manga_viewer.gui
-
-    monkeypatch.setattr(manga_viewer.gui, "main", lambda: 0)
-    assert main(["gui"]) == 0
-
-
-def test_output_survives_non_cp949_characters(tmp_path):
-    folder = tmp_path / "気"  # not encodable in cp949
-    folder.mkdir()
-    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
-    code = (
-        "import sys\n"
-        "from manga_viewer.cli import main\n"
-        f"sys.exit(main(['translate', {str(folder)!r}, 'out', '--llama-server', 'x', '--model', 'm']))\n"
-    )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env)
-    assert result.returncode == 2, result.stderr.decode("utf-8", "replace")
-    assert "気" in result.stdout.decode("utf-8")
-```
-
-- [ ] **Step 2: 실패 확인**
-
-Run: `& $uv run pytest tests/test_cli.py -v`
-Expected: FAIL (`invalid choice: 'translate'`, `cli` 속성 없음, `manga_viewer.gui` 없음)
-
-`test_gui_subcommand_launches_window`는 Task 5 전까지 `ModuleNotFoundError`로 실패한다. 이 태스크에서는 `pytest.importorskip`을 쓰지 말고, 아래처럼 `gui.py` 자리 표시 파일을 만들어 통과시킨다. Task 5가 이 파일을 실제 창으로 교체한다.
-
-`src/manga_viewer/gui.py` (임시):
-
-```python
-"""Replaced by the real window in the next task."""
-
-
-def main() -> int:
-    raise SystemExit("GUI is not implemented yet")
-```
-
-- [ ] **Step 3: `cli.py` 전체 교체**
-
-```python
-from __future__ import annotations
-
-import argparse
-import shutil
-import sys
-from pathlib import Path
-
-from .engine import EngineError, EngineLayout, default_engine_dir, setup_engine
-from .pipeline import PipelineError, TranslationRequest, run_translation
-
-
-class CliError(Exception):
-    """A problem the user can fix; printed as-is with exit code 2."""
-
-
-def _force_utf8_stdout() -> None:
-    # The Windows console code page (e.g. cp949) cannot encode every kanji in file names.
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(encoding="utf-8", errors="replace")
-
-
-def main(argv: list[str] | None = None) -> int:
-    _force_utf8_stdout()
-    parser = argparse.ArgumentParser(prog="manga-viewer", description="로컬 LLM으로 일본 만화를 한국어로 번역합니다")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    setup = sub.add_parser("setup", help="번역 엔진(BallonsTranslator)과 모델을 설치")
-    setup.add_argument("--engine-dir", type=Path, help="엔진 설치 폴더 (기본: %%LOCALAPPDATA%%\\manga-viewer\\BallonsTranslator)")
-    setup.add_argument("--uv", type=Path, help="uv.exe 경로 (기본: PATH에서 찾음)")
-
-    translate = sub.add_parser("translate", help="폴더의 만화를 번역해 결과 이미지를 저장")
-    translate.add_argument("input", type=Path, help="원본 만화 이미지 폴더")
-    translate.add_argument("output", type=Path, help="번역 이미지를 저장할 폴더")
-    translate.add_argument("--llama-server", type=Path, required=True, help="llama-server.exe 경로")
-    translate.add_argument("--model", type=Path, required=True, help="번역용 GGUF 모델 경로")
-    translate.add_argument("--engine-dir", type=Path, help="엔진 설치 폴더")
-    translate.add_argument("--ctx-size", type=int, default=8192, help="LLM 컨텍스트 길이")
-    translate.add_argument("--keep-work", action="store_true", help="작업 폴더를 지우지 않고 남김")
-
-    sub.add_parser("gui", help="간단한 창으로 실행")
-
-    args = parser.parse_args(argv)
-    try:
-        if args.command == "setup":
-            return _run_setup(args)
-        if args.command == "gui":
-            from .gui import main as gui_main  # tkinter only when asked for
-
-            return gui_main()
-        return _run_translate(args)
-    except (CliError, EngineError, PipelineError) as e:
-        print(e)
-        return 2
-
-
-def _layout(args: argparse.Namespace) -> EngineLayout:
-    return EngineLayout(args.engine_dir or default_engine_dir())
-
-
-def _run_setup(args: argparse.Namespace) -> int:
-    layout = _layout(args)
-    found_uv = shutil.which("uv")
-    uv = args.uv or (Path(found_uv) if found_uv else None)
-    if uv is None or not uv.is_file():
-        raise CliError("uv를 찾을 수 없습니다. --uv로 uv.exe 경로를 지정하세요.")
-    git = shutil.which("git")
-    if git is None:
-        raise CliError("git을 찾을 수 없습니다. Git for Windows를 설치한 뒤 다시 실행하세요.")
-    print(f"엔진 설치 위치: {layout.root}")
-    setup_engine(layout, uv=uv, git=Path(git))
-    print("설치가 끝났습니다.")
-    return 0
-
-
-def _run_translate(args: argparse.Namespace) -> int:
-    req = TranslationRequest(
-        input_dir=args.input,
-        output_dir=args.output,
-        llama_server=args.llama_server,
-        model=args.model,
-        engine=_layout(args),
-        ctx_size=args.ctx_size,
-        keep_work=args.keep_work,
-    )
-    result = run_translation(req, on_log=print, on_progress=lambda done, total: print(f"진행: {done}/{total}"))
-    print(f"완료: {result.total - len(result.missing)}/{result.total}장 저장 → {args.output}")
-    if result.engine_exit_code != 0:
-        print(f"엔진 종료 코드: {result.engine_exit_code}")
-    for page in result.missing:
-        print(f"결과 없음: {page.name}")
-    if result.work_dir is not None:
-        print(f"작업 폴더: {result.work_dir}")
-    return 0 if result.ok else 1
-```
-
-- [ ] **Step 4: 통과 확인**
-
-Run: `& $uv run pytest tests/test_cli.py -v`
-Expected: 모두 PASS
+Run: `& $uv run pytest tests/test_llama.py tests/test_engine.py tests/test_pipeline.py -v`
+Expected: 모두 PASS (llama 1, engine 13, pipeline 5)
 
 Run: `& $uv run pytest -v -m "not gpu"`
 Expected: 전체 통과 (계획 1의 옛 모듈 테스트도 아직 남아 있다)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/manga_viewer/cli.py src/manga_viewer/gui.py tests/test_cli.py
-git commit -m "feat: add setup, translate and gui commands"
+git add src/manga_viewer/llm/llama.py src/manga_viewer/engine.py src/manga_viewer/pipeline.py tests/test_llama.py tests/test_engine.py tests/test_pipeline.py
+git commit -m "feat: add the translation pipeline and windowless helper commands"
 ```
 
 ---
 
-### Task 5: 간단한 GUI (`gui.py`, `settings.py`)
+### Task 4: GUI (`gui.py`, `settings.py`, `__main__.py`)
 
 **Files:**
-- Create: `src/manga_viewer/settings.py`
-- Replace: `src/manga_viewer/gui.py`
+- Create: `src/manga_viewer/settings.py`, `src/manga_viewer/gui.py`, `src/manga_viewer/__main__.py`
 - Test: `tests/test_settings.py`, `tests/test_gui.py`
 
 **Interfaces:**
-- Consumes: Task 1 `EngineError`, `EngineLayout`, `default_engine_dir`; Task 3 `SOURCE_LANGUAGE`, `TARGET_LANGUAGE`, `PipelineError`, `TranslationRequest`, `TranslationResult`, `run_translation`
+- Consumes: Task 1 `EngineError`, `EngineLayout`, `default_engine_dir`, `setup_engine`; Task 2 `run_streaming`; Task 3 `SOURCE_LANGUAGE`, `TARGET_LANGUAGE`, `PipelineError`, `TranslationRequest`, `TranslationResult`, `run_translation`
 - Produces:
-  - `@dataclass Settings(llama_server: str = "", model: str = "", engine_dir: str = "", last_input: str = "", last_output: str = "")`
+  - `@dataclass Settings(llama_server: str = "", model: str = "", engine_dir: str = "", uv: str = "", last_input: str = "", last_output: str = "")`
   - `default_settings_path() -> Path` (`%LOCALAPPDATA%\manga-viewer\settings.json`), `load_settings(path) -> Settings`(없거나 깨졌으면 기본값, 모르는 키 무시), `save_settings(settings, path) -> None`
-  - `gui.default_output_dir(input_dir: Path) -> Path` (`<입력>_번역`), `gui.format_progress(done, total) -> str`, `gui.model_label(path: str) -> str`, `gui.build_request(settings, input_dir: str, output_dir: str) -> TranslationRequest`, `gui.summary_text(result, output_dir: Path) -> str`, `class gui.App`, `gui.main() -> int`
+  - `gui.default_output_dir(input_dir: Path) -> Path` (`<입력>_번역`), `gui.format_progress(done, total) -> str`, `gui.model_label(path: str) -> str`, `gui.engine_layout(settings) -> EngineLayout`, `gui.engine_status_text(layout) -> str`, `gui.find_uv(settings) -> Path | None`, `gui.make_runner(on_line) -> Callable[[Sequence[str]], None]`, `gui.build_request(settings, input_dir: str, output_dir: str) -> TranslationRequest`, `gui.summary_text(result, output_dir: Path) -> str`, `class gui.App`, `gui.main() -> int`
+  - `python -m manga_viewer`로 창 실행
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -1519,7 +1302,7 @@ from manga_viewer.settings import Settings, load_settings, save_settings
 
 def test_roundtrip(tmp_path):
     path = tmp_path / "sub" / "settings.json"
-    settings = Settings(llama_server="C:/l.exe", model="C:/모델.gguf", last_input="D:/만화")
+    settings = Settings(llama_server="C:/l.exe", model="C:/모델.gguf", uv="C:/uv.exe", last_input="D:/만화")
     save_settings(settings, path)
     assert load_settings(path) == settings
     assert "모델" in path.read_text(encoding="utf-8")  # stored as readable UTF-8
@@ -1541,14 +1324,28 @@ def test_unknown_keys_are_ignored(tmp_path):
 `tests/test_gui.py`:
 
 ```python
+import sys
 from pathlib import Path
 
 import pytest
 
-from manga_viewer.engine import EngineLayout
-from manga_viewer.gui import build_request, default_output_dir, format_progress, model_label, summary_text
+import manga_viewer.gui as gui
+from manga_viewer.engine import ENGINE_COMMIT, EngineError, EngineLayout
+from manga_viewer.gui import (
+    build_request,
+    default_output_dir,
+    engine_layout,
+    engine_status_text,
+    find_uv,
+    format_progress,
+    make_runner,
+    model_label,
+    summary_text,
+)
 from manga_viewer.pipeline import PipelineError, TranslationResult
 from manga_viewer.settings import Settings
+
+PYTHON = getattr(sys, "_base_executable", sys.executable)
 
 
 def test_default_output_dir():
@@ -1565,6 +1362,37 @@ def test_model_label():
     assert model_label("C:/models/gemma-4-e4b-Q4_K_M.gguf") == "gemma-4-e4b-Q4_K_M"
 
 
+def test_engine_layout_and_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(gui, "default_engine_dir", lambda: tmp_path / "default")
+    assert engine_layout(Settings()) == EngineLayout(tmp_path / "default")
+    layout = engine_layout(Settings(engine_dir=str(tmp_path / "custom")))
+    assert layout == EngineLayout(tmp_path / "custom")
+    assert engine_status_text(layout).startswith("설치 필요")
+    layout.python.parent.mkdir(parents=True)
+    layout.python.write_bytes(b"")
+    layout.marker.write_text(ENGINE_COMMIT, encoding="utf-8")
+    assert engine_status_text(layout) == "설치됨"
+
+
+def test_find_uv(tmp_path, monkeypatch):
+    uv = tmp_path / "uv.exe"
+    uv.write_bytes(b"")
+    monkeypatch.setattr(gui.shutil, "which", lambda name: None)
+    assert find_uv(Settings(uv=str(uv))) == uv
+    assert find_uv(Settings(uv=str(tmp_path / "gone.exe"))) is None
+    monkeypatch.setattr(gui.shutil, "which", lambda name: "C:/tools/uv.exe")
+    assert find_uv(Settings()) == Path("C:/tools/uv.exe")
+
+
+def test_make_runner_streams_and_raises():
+    lines = []
+    run = make_runner(lines.append)
+    run([PYTHON, "-c", "print('설치 중')"])
+    assert lines == ["설치 중"]
+    with pytest.raises(EngineError, match="코드 3"):
+        run([PYTHON, "-c", "import sys; sys.exit(3)"])
+
+
 def test_build_request_requires_every_choice():
     full = Settings(llama_server="C:/l.exe", model="C:/m.gguf")
     with pytest.raises(PipelineError, match="입력 폴더"):
@@ -1578,15 +1406,11 @@ def test_build_request_requires_every_choice():
 
 
 def test_build_request(tmp_path, monkeypatch):
-    import manga_viewer.gui as gui
-
     monkeypatch.setattr(gui, "default_engine_dir", lambda: tmp_path / "default")
     req = build_request(Settings(llama_server="C:/l.exe", model="C:/m.gguf"), "D:/in", "D:/out")
     assert req.input_dir == Path("D:/in") and req.output_dir == Path("D:/out")
     assert req.model == Path("C:/m.gguf") and req.llama_server == Path("C:/l.exe")
     assert req.engine == EngineLayout(tmp_path / "default")
-    custom = build_request(Settings(llama_server="C:/l.exe", model="C:/m.gguf", engine_dir="E:/engine"), "D:/in", "D:/out")
-    assert custom.engine == EngineLayout(Path("E:/engine"))
 
 
 def test_summary_text():
@@ -1602,12 +1426,12 @@ def test_summary_text():
 - [ ] **Step 2: 실패 확인**
 
 Run: `& $uv run pytest tests/test_settings.py tests/test_gui.py -v`
-Expected: FAIL (`ModuleNotFoundError: No module named 'manga_viewer.settings'`, `cannot import name 'build_request'`)
+Expected: FAIL (`ModuleNotFoundError: No module named 'manga_viewer.settings'` / `'manga_viewer.gui'`)
 
 - [ ] **Step 3: `settings.py` 작성**
 
 ```python
-"""GUI choices remembered between runs."""
+"""Window choices remembered between runs."""
 from __future__ import annotations
 
 import json
@@ -1621,6 +1445,7 @@ class Settings:
     llama_server: str = ""
     model: str = ""
     engine_dir: str = ""
+    uv: str = ""
     last_input: str = ""
     last_output: str = ""
 
@@ -1646,19 +1471,22 @@ def save_settings(settings: Settings, path: Path) -> None:
     path.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2), encoding="utf-8")
 ```
 
-- [ ] **Step 4: `gui.py` 교체**
+- [ ] **Step 4: `gui.py` 작성**
 
 ```python
-"""Small window: pick folders, see model and languages, run a translation and watch its progress."""
+"""The app window: pick folders, see model and languages, install the engine, translate and watch progress."""
 from __future__ import annotations
 
 import queue
+import shutil
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Callable, Sequence
 
-from .engine import EngineError, EngineLayout, default_engine_dir
+from .engine import EngineError, EngineLayout, default_engine_dir, setup_engine
+from .engine_run import run_streaming
 from .pipeline import (
     SOURCE_LANGUAGE,
     TARGET_LANGUAGE,
@@ -1671,6 +1499,7 @@ from .settings import Settings, default_settings_path, load_settings, save_setti
 
 TITLE = "manga-viewer 번역"
 POLL_MS = 100
+NOT_SELECTED = "(선택되지 않음)"
 
 
 def default_output_dir(input_dir: Path) -> Path:
@@ -1682,7 +1511,34 @@ def format_progress(done: int, total: int) -> str:
 
 
 def model_label(path: str) -> str:
-    return Path(path).stem if path else "(선택되지 않음)"
+    return Path(path).stem if path else NOT_SELECTED
+
+
+def engine_layout(settings: Settings) -> EngineLayout:
+    return EngineLayout(Path(settings.engine_dir) if settings.engine_dir else default_engine_dir())
+
+
+def engine_status_text(layout: EngineLayout) -> str:
+    return "설치됨" if layout.is_ready() else "설치 필요 (약 1GB 다운로드, 몇 분 걸림)"
+
+
+def find_uv(settings: Settings) -> Path | None:
+    if settings.uv:
+        chosen = Path(settings.uv)
+        return chosen if chosen.is_file() else None
+    found = shutil.which("uv")
+    return Path(found) if found else None
+
+
+def make_runner(on_line: Callable[[str], None]) -> Callable[[Sequence[str]], None]:
+    """Engine setup commands for the window: no console, output goes to the log."""
+
+    def run(argv: Sequence[str]) -> None:
+        code = run_streaming(argv, Path.home(), on_line=on_line, stdin_text="")
+        if code != 0:
+            raise EngineError(f"명령이 실패했습니다 (코드 {code}): {' '.join(map(str, argv))}")
+
+    return run
 
 
 def build_request(settings: Settings, input_dir: str, output_dir: str) -> TranslationRequest:
@@ -1694,13 +1550,12 @@ def build_request(settings: Settings, input_dir: str, output_dir: str) -> Transl
         raise PipelineError("번역 모델(GGUF 파일)을 선택하세요.")
     if not settings.llama_server:
         raise PipelineError("llama-server.exe를 선택하세요.")
-    engine_root = Path(settings.engine_dir) if settings.engine_dir else default_engine_dir()
     return TranslationRequest(
         input_dir=Path(input_dir),
         output_dir=Path(output_dir),
         llama_server=Path(settings.llama_server),
         model=Path(settings.model),
-        engine=EngineLayout(engine_root),
+        engine=engine_layout(settings),
     )
 
 
@@ -1722,11 +1577,12 @@ class App:
         self.running = False
 
         root.title(TITLE)
-        root.minsize(600, 460)
+        root.minsize(620, 500)
         self.input_var = tk.StringVar(value=self.settings.last_input)
         self.output_var = tk.StringVar(value=self.settings.last_output)
         self.model_var = tk.StringVar(value=model_label(self.settings.model))
-        self.llama_var = tk.StringVar(value=self.settings.llama_server or "(선택되지 않음)")
+        self.llama_var = tk.StringVar(value=self.settings.llama_server or NOT_SELECTED)
+        self.engine_var = tk.StringVar()
         self.progress_var = tk.StringVar(value=format_progress(0, 0))
 
         frame = ttk.Frame(root, padding=12)
@@ -1735,39 +1591,50 @@ class App:
 
         ttk.Label(frame, text="입력 폴더").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Entry(frame, textvariable=self.input_var).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(frame, text="찾아보기...", command=self._pick_input).grid(row=0, column=2)
+        ttk.Button(frame, text="찾아보기...", command=self._pick_input).grid(row=0, column=2, sticky="ew")
 
         ttk.Label(frame, text="출력 폴더").grid(row=1, column=0, sticky="w", pady=4)
         ttk.Entry(frame, textvariable=self.output_var).grid(row=1, column=1, sticky="ew", padx=6)
-        ttk.Button(frame, text="찾아보기...", command=self._pick_output).grid(row=1, column=2)
+        ttk.Button(frame, text="찾아보기...", command=self._pick_output).grid(row=1, column=2, sticky="ew")
 
         ttk.Label(frame, text="번역 모델").grid(row=2, column=0, sticky="w", pady=4)
         ttk.Label(frame, textvariable=self.model_var).grid(row=2, column=1, sticky="w", padx=6)
-        ttk.Button(frame, text="변경...", command=self._pick_model).grid(row=2, column=2)
+        ttk.Button(frame, text="변경...", command=self._pick_model).grid(row=2, column=2, sticky="ew")
 
         ttk.Label(frame, text="llama-server").grid(row=3, column=0, sticky="w", pady=4)
         ttk.Label(frame, textvariable=self.llama_var).grid(row=3, column=1, sticky="w", padx=6)
-        ttk.Button(frame, text="변경...", command=self._pick_llama).grid(row=3, column=2)
+        ttk.Button(frame, text="변경...", command=self._pick_llama).grid(row=3, column=2, sticky="ew")
 
         ttk.Label(frame, text="언어").grid(row=4, column=0, sticky="w", pady=4)
         ttk.Label(frame, text=f"{SOURCE_LANGUAGE} → {TARGET_LANGUAGE}").grid(row=4, column=1, sticky="w", padx=6)
 
+        ttk.Label(frame, text="번역 엔진").grid(row=5, column=0, sticky="w", pady=4)
+        ttk.Label(frame, textvariable=self.engine_var).grid(row=5, column=1, sticky="w", padx=6)
+        self.install_button = ttk.Button(frame, text="엔진 설치", command=self._install)
+        self.install_button.grid(row=5, column=2, sticky="ew")
+
         self.bar = ttk.Progressbar(frame, mode="determinate", maximum=1)
-        self.bar.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 4))
-        ttk.Label(frame, textvariable=self.progress_var).grid(row=5, column=2)
+        self.bar.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(12, 4))
+        ttk.Label(frame, textvariable=self.progress_var).grid(row=6, column=2)
 
         self.start_button = ttk.Button(frame, text="번역 시작", command=self._start)
-        self.start_button.grid(row=6, column=0, columnspan=3, pady=8)
+        self.start_button.grid(row=7, column=0, columnspan=3, pady=8)
 
         self.log = tk.Text(frame, height=12, state="disabled", wrap="word")
-        self.log.grid(row=7, column=0, columnspan=3, sticky="nsew")
-        frame.rowconfigure(7, weight=1)
+        self.log.grid(row=8, column=0, columnspan=3, sticky="nsew")
+        frame.rowconfigure(8, weight=1)
 
+        self._refresh_engine()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.after(POLL_MS, self._drain)
 
+    # --- settings and pickers ---
+
     def _save(self) -> None:
         save_settings(self.settings, self.settings_path)
+
+    def _refresh_engine(self) -> None:
+        self.engine_var.set(engine_status_text(engine_layout(self.settings)))
 
     def _pick_input(self) -> None:
         path = filedialog.askdirectory(title="입력 폴더 선택")
@@ -1795,11 +1662,57 @@ class App:
             self.llama_var.set(path)
             self._save()
 
+    # --- running work on a background thread ---
+
     def _append_log(self, line: str) -> None:
         self.log.configure(state="normal")
         self.log.insert("end", line + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
+
+    def _begin(self) -> None:
+        self.running = True
+        self.start_button.configure(state="disabled")
+        self.install_button.configure(state="disabled")
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.configure(state="disabled")
+
+    def _finish(self) -> None:
+        self.running = False
+        self.start_button.configure(state="normal")
+        self.install_button.configure(state="normal")
+        self._refresh_engine()
+
+    def _install(self) -> None:
+        uv = find_uv(self.settings)
+        if uv is None:
+            path = filedialog.askopenfilename(title="uv.exe 선택", filetypes=[("실행 파일", "*.exe")])
+            if not path:
+                return
+            self.settings.uv = path
+            self._save()
+            uv = Path(path)
+        git = shutil.which("git")
+        if git is None:
+            messagebox.showerror(TITLE, "git을 찾을 수 없습니다. Git for Windows를 설치한 뒤 다시 시도하세요.")
+            return
+        self._begin()
+        threading.Thread(target=self._install_work, args=(engine_layout(self.settings), uv, Path(git)), daemon=True).start()
+
+    def _install_work(self, layout: EngineLayout, uv: Path, git: Path) -> None:
+        # Worker thread: only talk to Tk through the event queue.
+        def log(line: str) -> None:
+            self.events.put(("log", line))
+
+        try:
+            log(f"엔진 설치 위치: {layout.root}")
+            setup_engine(layout, uv=uv, git=git, run=make_runner(log), log=log)
+            self.events.put(("installed",))
+        except EngineError as e:
+            self.events.put(("error", str(e)))
+        except Exception as e:  # keep the window usable and show what went wrong
+            self.events.put(("error", f"예상하지 못한 오류: {e!r}"))
 
     def _start(self) -> None:
         try:
@@ -1810,16 +1723,13 @@ class App:
         self.settings.last_input = str(req.input_dir)
         self.settings.last_output = str(req.output_dir)
         self._save()
-        self.running = True
-        self.start_button.configure(state="disabled")
-        self.log.configure(state="normal")
-        self.log.delete("1.0", "end")
-        self.log.configure(state="disabled")
+        self._begin()
         self.bar.configure(maximum=1, value=0)
-        threading.Thread(target=self._work, args=(req,), daemon=True).start()
+        self.progress_var.set(format_progress(0, 0))
+        threading.Thread(target=self._translate_work, args=(req,), daemon=True).start()
 
-    def _work(self, req: TranslationRequest) -> None:
-        # Runs on a worker thread: only talk to Tk through the event queue.
+    def _translate_work(self, req: TranslationRequest) -> None:
+        # Worker thread: only talk to Tk through the event queue.
         try:
             result = run_translation(
                 req,
@@ -1836,30 +1746,30 @@ class App:
         try:
             while True:
                 event = self.events.get_nowait()
-                if event[0] == "log":
+                kind = event[0]
+                if kind == "log":
                     self._append_log(event[1])
-                elif event[0] == "progress":
+                elif kind == "progress":
                     _, done, total = event
                     self.bar.configure(maximum=max(total, 1), value=done)
                     self.progress_var.set(format_progress(done, total))
-                elif event[0] == "done":
+                elif kind == "installed":
+                    self._finish()
+                    messagebox.showinfo(TITLE, "엔진 설치가 끝났습니다.")
+                elif kind == "done":
                     self._finish()
                     _, result, output_dir = event
                     show = messagebox.showinfo if result.ok else messagebox.showwarning
                     show(TITLE, summary_text(result, output_dir))
-                elif event[0] == "error":
+                elif kind == "error":
                     self._finish()
                     messagebox.showerror(TITLE, event[1])
         except queue.Empty:
             pass
         self.root.after(POLL_MS, self._drain)
 
-    def _finish(self) -> None:
-        self.running = False
-        self.start_button.configure(state="normal")
-
     def _on_close(self) -> None:
-        if self.running and not messagebox.askokcancel(TITLE, "번역 중입니다. 창을 닫으면 번역이 중단됩니다. 닫을까요?"):
+        if self.running and not messagebox.askokcancel(TITLE, "작업 중입니다. 창을 닫으면 작업이 중단됩니다. 닫을까요?"):
             return
         # Exiting closes our Job Object handles, which ends llama-server and the engine too.
         self.root.destroy()
@@ -1872,50 +1782,74 @@ def main() -> int:
     return 0
 ```
 
+`src/manga_viewer/__main__.py`:
+
+```python
+from .gui import main
+
+raise SystemExit(main())
+```
+
 - [ ] **Step 5: 통과 확인**
 
-Run: `& $uv run pytest tests/test_settings.py tests/test_gui.py tests/test_cli.py -v`
-Expected: 모두 PASS
+Run: `& $uv run pytest tests/test_settings.py tests/test_gui.py -v`
+Expected: 모두 PASS (settings 3, gui 9)
 
 Run: `& $uv run python -c "import tkinter; tkinter.Tk().destroy(); print('tk ok')"`
-Expected: `tk ok` (uv가 설치한 Python에 tkinter가 포함되어 있는지 확인)
+Expected: `tk ok`
 
-- [ ] **Step 6: 창 띄워 보기 (수동, 짧게)**
+Run: `& $uv run pytest -v -m "not gpu"`
+Expected: 전체 통과
 
-Run: `& $uv run manga-viewer gui`
-Expected: 입력·출력 폴더, 번역 모델, llama-server, 언어("일본어 → 한국어"), 진행 막대, "번역 시작" 버튼, 로그 영역이 보인다. 아무것도 고르지 않고 "번역 시작"을 누르면 "입력 폴더를 선택하세요." 경고가 뜬다. 창을 닫는다. (실제 번역은 Task 7에서 한다.)
+- [ ] **Step 6: 창이 뜨는지 확인 (자동, 짧게)**
+
+창을 띄우고 3초 뒤 화면을 캡처한 다음 닫는다. 캡처는 커밋하지 않는다.
+
+```powershell
+$p = Start-Process -PassThru -FilePath ".venv\Scripts\pythonw.exe" -ArgumentList "-m", "manga_viewer"
+Start-Sleep -Seconds 3
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+[System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+New-Item -ItemType Directory -Force bench-out | Out-Null
+$bmp.Save("bench-out\gui-smoke.png")
+Stop-Process -Id $p.Id
+```
+
+Expected: `bench-out\gui-smoke.png`에 입력·출력 폴더, 번역 모델, llama-server, 언어("일본어 → 한국어"), 번역 엔진 상태와 "엔진 설치" 버튼, 진행 막대, "번역 시작", 로그 영역이 보인다. 캡처 파일을 열어 확인하고 보고서에 결과를 적는다.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/manga_viewer/settings.py src/manga_viewer/gui.py tests/test_settings.py tests/test_gui.py
-git commit -m "feat: add a small tkinter window for folder translation"
+git add src/manga_viewer/settings.py src/manga_viewer/gui.py src/manga_viewer/__main__.py tests/test_settings.py tests/test_gui.py
+git commit -m "feat: add the translation window with engine install and progress"
 ```
 
 ---
 
-### Task 6: 정리, 라이선스, README
+### Task 5: 정리 (CLI·옛 파이프라인 제거), 라이선스, README
 
 **Files:**
-- Delete: `src/manga_viewer/background.py`, `bench.py`, `glossary.py`, `order.py`, `page_image.py`, `render.py`, `translate.py`, `types.py`, `vision.py`, `llm/client.py`
-- Delete: `tests/test_background.py`, `test_bench.py`, `test_glossary.py`, `test_order.py`, `test_page_image.py`, `test_render.py`, `test_translate.py`, `test_vision.py`, `test_client.py`
+- Delete: `src/manga_viewer/cli.py`, `src/manga_viewer/background.py`, `bench.py`, `glossary.py`, `order.py`, `page_image.py`, `render.py`, `translate.py`, `types.py`, `vision.py`, `llm/client.py`
+- Delete: `tests/test_cli.py`, `tests/test_background.py`, `test_bench.py`, `test_glossary.py`, `test_order.py`, `test_page_image.py`, `test_render.py`, `test_translate.py`, `test_vision.py`, `test_client.py`
 - Modify: `pyproject.toml`, `tests/test_imports.py`, `uv.lock`
 - Create: `LICENSE`, `README.md`
 
 **Interfaces:**
-- Consumes: Task 1~5의 모듈 (남는 모듈: `source`, `winjob`, `llm/process`, `llm/llama`, `engine`, `engine_run`, `pipeline`, `settings`, `gui`, `cli`)
+- Consumes: Task 1~4의 모듈 (남는 모듈: `source`, `winjob`, `llm/process`, `llm/llama`, `engine`, `engine_run`, `pipeline`, `settings`, `gui`, `__main__`)
 
 - [ ] **Step 1: 사용되지 않는 모듈과 테스트 삭제**
 
 ```powershell
-git rm src/manga_viewer/background.py src/manga_viewer/bench.py src/manga_viewer/glossary.py src/manga_viewer/order.py src/manga_viewer/page_image.py src/manga_viewer/render.py src/manga_viewer/translate.py src/manga_viewer/types.py src/manga_viewer/vision.py src/manga_viewer/llm/client.py
-git rm tests/test_background.py tests/test_bench.py tests/test_glossary.py tests/test_order.py tests/test_page_image.py tests/test_render.py tests/test_translate.py tests/test_vision.py tests/test_client.py
+git rm src/manga_viewer/cli.py src/manga_viewer/background.py src/manga_viewer/bench.py src/manga_viewer/glossary.py src/manga_viewer/order.py src/manga_viewer/page_image.py src/manga_viewer/render.py src/manga_viewer/translate.py src/manga_viewer/types.py src/manga_viewer/vision.py src/manga_viewer/llm/client.py
+git rm tests/test_cli.py tests/test_background.py tests/test_bench.py tests/test_glossary.py tests/test_order.py tests/test_page_image.py tests/test_render.py tests/test_translate.py tests/test_vision.py tests/test_client.py
 ```
 
-그다음 남은 코드에서 지운 모듈을 참조하는 곳이 없는지 확인한다.
+남은 코드가 지운 모듈을 참조하지 않는지 확인한다.
 
-Run: `git grep -n -E "background|bench|glossary|\border\b|page_image|render|translate import|\btypes\b|vision|llm.client|ChatClient" -- src tests`
-Expected: `translate` 하위 명령 이름, `pipeline`/`gui`의 `TranslationRequest`·`run_translation` 같은 정상 사용 외에는 결과 없음. 남은 모듈이 지운 모듈을 import하면 이 단계에서 고친다.
+Run: `git grep -n -E "manga_viewer\.(cli|background|bench|glossary|order|page_image|render|translate|types|vision)\b|from \.(cli|background|bench|glossary|order|page_image|render|translate|types|vision) |llm\.client|ChatClient" -- src tests`
+Expected: 결과 없음. 있으면 이 단계에서 고친다.
 
 - [ ] **Step 2: `tests/test_imports.py` 교체**
 
@@ -1924,10 +1858,10 @@ import subprocess
 import sys
 
 
-def test_engine_modules_are_never_imported_by_the_wrapper():
+def test_engine_modules_are_never_imported_by_the_app():
     code = (
         "import sys\n"
-        "import manga_viewer.cli, manga_viewer.engine, manga_viewer.engine_run, manga_viewer.pipeline, manga_viewer.gui\n"
+        "import manga_viewer.gui, manga_viewer.pipeline, manga_viewer.engine, manga_viewer.engine_run\n"
         "leaked = [m for m in ('torch', 'ballontranslator') if m in sys.modules]\n"
         "assert not leaked, leaked\n"
     )
@@ -1941,7 +1875,7 @@ def test_engine_modules_are_never_imported_by_the_wrapper():
 [project]
 name = "manga-viewer"
 version = "0.1.0"
-description = "Batch Japanese-to-Korean manga translation with a local LLM, driving BallonsTranslator"
+description = "Japanese-to-Korean manga translation window using a local LLM and BallonsTranslator"
 readme = "README.md"
 license = "GPL-3.0-only"
 requires-python = ">=3.12,<3.13"
@@ -1950,11 +1884,8 @@ dependencies = [
     "natsort>=8.4",
 ]
 
-[project.scripts]
-manga-viewer = "manga_viewer.cli:main"
-
 [project.gui-scripts]
-manga-viewer-gui = "manga_viewer.gui:main"
+manga-viewer = "manga_viewer.gui:main"
 
 [dependency-groups]
 dev = [
@@ -1986,7 +1917,7 @@ Invoke-WebRequest https://www.gnu.org/licenses/gpl-3.0.txt -OutFile LICENSE
 ````markdown
 # manga-viewer
 
-일본 만화 이미지 폴더를 로컬 LLM으로 한국어로 번역해, 말풍선을 지우고 한국어를 식자한 이미지를 저장하는 명령줄 도구입니다.
+일본 만화 이미지 폴더를 로컬 LLM으로 한국어로 번역해, 말풍선을 지우고 한국어를 식자한 이미지를 저장하는 Windows 프로그램입니다.
 검출·OCR·인페인팅·식자는 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator)가, 번역은 로컬
 [llama.cpp](https://github.com/ggml-org/llama.cpp) 서버(Gemma 4 등 GGUF 모델)가 맡습니다.
 
@@ -1996,31 +1927,17 @@ Invoke-WebRequest https://www.gnu.org/licenses/gpl-3.0.txt -OutFile LICENSE
 - [uv](https://docs.astral.sh/uv/), [Git for Windows](https://git-scm.com/download/win)
 - llama.cpp Windows CUDA 빌드(`llama-server.exe`)와 번역용 GGUF 모델
 
-## 설치
+## 실행
 
 ```powershell
 uv sync
-uv run manga-viewer setup
+uv run manga-viewer
 ```
 
-`setup`은 BallonsTranslator(고정 커밋)와 전용 Python 환경, 검출·OCR·인페인팅 모델(약 1GB)을
-`%LOCALAPPDATA%\manga-viewer\BallonsTranslator`에 설치합니다. 다시 실행해도 안전합니다.
-
-## 번역
-
-```powershell
-uv run manga-viewer translate <원본 폴더> <결과 폴더> --llama-server <llama-server.exe> --model <모델.gguf>
-```
-
-원본 폴더는 건드리지 않고, 결과 폴더에 번역된 이미지를 저장합니다.
-
-## 창으로 실행
-
-```powershell
-uv run manga-viewer gui
-```
-
-입력·출력 폴더와 번역 모델(GGUF), llama-server.exe를 고르고 "번역 시작"을 누르면 진행 상황이 표시됩니다.
+1. 처음 한 번 "엔진 설치"를 누릅니다. BallonsTranslator(고정 커밋), 전용 Python 환경, 검출·OCR·인페인팅 모델(약 1GB)을
+   `%LOCALAPPDATA%\manga-viewer\BallonsTranslator`에 설치합니다.
+2. 번역 모델(GGUF)과 `llama-server.exe`를 고릅니다.
+3. 입력 폴더와 출력 폴더를 고르고 "번역 시작"을 누릅니다. 원본 폴더는 건드리지 않습니다.
 
 ## 라이선스
 
@@ -2030,7 +1947,7 @@ GPL-3.0. BallonsTranslator(GPL-3.0)를 사용합니다.
 - [ ] **Step 5: 의존성 정리와 전체 테스트**
 
 Run: `& $uv lock` 그리고 `& $uv sync`
-Expected: torch, mokuro, numpy, pillow 등이 venv에서 제거된다.
+Expected: torch, mokuro, numpy, pillow 등이 venv에서 제거되고 `.venv\Scripts\manga-viewer.exe`(창 실행 파일)가 생긴다.
 
 Run: `& $uv run pytest -v`
 Expected: 전체 통과, 경고 없음
@@ -2039,43 +1956,77 @@ Expected: 전체 통과, 경고 없음
 
 ```bash
 git add -A src tests pyproject.toml uv.lock LICENSE README.md
-git commit -m "chore: drop the in-house pipeline, license under GPL-3.0, add README"
+git commit -m "chore: keep only the GUI, drop the in-house pipeline, license under GPL-3.0"
 ```
 
 ---
 
-### Task 7: 실제 확인 (수동)
+### Task 6: 실제 확인 (수동)
 
 코드 변경은 없다. 모델 파일 이름은 `.superpowers/sdd/2026-09-25-plan1-translation-core/task-10-report.md`에 있다.
+창의 버튼은 사람이 누르는 것이므로, 이 태스크는 창과 **같은 함수**를 스크립트로 호출해 검증하고, 사용자가 창에서 바로 써 볼 수 있게 설정 파일을 채워 둔다.
 
-- [ ] **Step 1: setup 멱등성 확인**
+- [ ] **Step 1: 엔진 설치 흐름 (평가 때 설치한 엔진 재사용)**
 
-평가 때 설치한 엔진을 그대로 쓴다(새로 6GB를 받지 않기 위함).
-
-```powershell
-& $uv run manga-viewer setup --engine-dir .dev\BallonsTranslator --uv $uv
-```
-
-Expected: 고정 커밋 checkout, 패키지 설치(대부분 캐시), 모델은 검증 후 건너뜀, 종료 코드 0, `.dev\BallonsTranslator\.manga-viewer-setup` 생성.
-
-- [ ] **Step 2: 샘플 번역**
+"엔진 설치" 버튼과 같은 호출(`setup_engine` + `make_runner`)을 스크립트로 실행한다. 새로 6GB를 받지 않도록 `.dev\BallonsTranslator`를 쓴다.
 
 ```powershell
-& $uv run manga-viewer translate manga-data\173830003 bench-out\translate-bt-e4b --llama-server .dev\llama\llama-server.exe --model .dev\models\gemma-4-e4b\<Q4 파일> --engine-dir .dev\BallonsTranslator
+$code = @'
+import shutil, sys
+from pathlib import Path
+from manga_viewer.engine import EngineLayout, setup_engine
+from manga_viewer.gui import make_runner
+layout = EngineLayout(Path(r".dev\BallonsTranslator").resolve())
+setup_engine(layout, uv=Path(sys.argv[1]), git=Path(shutil.which("git")), run=make_runner(print), log=print)
+print("ready:", layout.is_ready())
+'@
+& $uv run python -c $code $uv
 ```
 
-Expected: 6/6장 저장, 종료 코드 0, `manga-data\173830003`는 변경 없음(`git status`와 파일 수정 시각 확인), 끝난 뒤 `llama-server`·엔진 Python 프로세스가 남아 있지 않음(`Get-Process llama-server, python -ErrorAction SilentlyContinue`).
+Expected: 고정 커밋 checkout, 패키지 설치(대부분 캐시), 모델 검증 후 건너뜀, 마지막 줄 `ready: True`.
 
-- [ ] **Step 3: GUI로 같은 번역 실행**
+- [ ] **Step 2: 번역 흐름**
 
-`%LOCALAPPDATA%\manga-viewer\settings.json`에 `engine_dir`(`.dev\BallonsTranslator`의 절대 경로), `model`, `llama_server`를 미리 넣어 두거나 창에서 고른다.
+"번역 시작" 버튼과 같은 호출(`run_translation`)을 스크립트로 실행한다.
 
 ```powershell
-& $uv run manga-viewer gui
+$code = @'
+import sys
+from pathlib import Path
+from manga_viewer.engine import EngineLayout
+from manga_viewer.pipeline import TranslationRequest, run_translation
+req = TranslationRequest(
+    input_dir=Path(r"manga-data\173830003"),
+    output_dir=Path(r"bench-out\translate-bt-e4b"),
+    llama_server=Path(r".dev\llama\llama-server.exe"),
+    model=Path(sys.argv[1]),
+    engine=EngineLayout(Path(r".dev\BallonsTranslator").resolve()),
+)
+result = run_translation(req, on_log=print, on_progress=lambda d, t: print(f"[진행] {d}/{t}"))
+print("ok:", result.ok, "saved:", len(result.saved), "missing:", [p.name for p in result.missing])
+'@
+& $uv run python -c $code ".dev\models\gemma-4-e4b\<Q4 파일>"
 ```
 
-입력 `manga-data\173830003`, 출력 `bench-out\translate-bt-gui`로 "번역 시작"을 누른다. 모델 이름과 "일본어 → 한국어"가 표시되고, 진행 막대가 0/6에서 6/6까지 오르며, 끝나면 요약 창이 뜨는지 확인한다. 창을 캡처해 보고서에 남긴다.
+Expected: `[진행]` 줄이 0/6에서 6/6까지 오르고 `ok: True saved: 6 missing: []`. `manga-data\173830003`는 변경 없음(`git status`, 파일 수정 시각). 끝난 뒤 `Get-Process llama-server -ErrorAction SilentlyContinue`가 비어 있다.
+
+- [ ] **Step 3: 사용자용 설정 파일 채우기**
+
+`%LOCALAPPDATA%\manga-viewer\settings.json`에 사용자가 창을 열자마자 쓸 수 있는 값을 넣는다(절대 경로).
+
+```json
+{
+  "llama_server": "<repo>\\.dev\\llama\\llama-server.exe",
+  "model": "<repo>\\.dev\\models\\gemma-4-e4b\\<Q4 파일>",
+  "engine_dir": "<repo>\\.dev\\BallonsTranslator",
+  "uv": "C:\\Users\\serial\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe",
+  "last_input": "<repo>\\manga-data\\173830003",
+  "last_output": "<repo>\\bench-out\\translate-bt-gui"
+}
+```
+
+그다음 Task 4 Step 6의 캡처 명령을 `.venv\Scripts\manga-viewer.exe`로 실행해, 값이 채워진 창과 "번역 엔진: 설치됨"이 보이는지 확인한다.
 
 - [ ] **Step 4: 사용자 확인**
 
-결과 폴더와 GUI 캡처를 사용자에게 알리고 품질을 확인받는다. 저장소에는 커밋하지 않는다.
+결과 폴더(`bench-out\translate-bt-e4b`)와 창 캡처를 사용자에게 알리고, 사용자가 `uv run manga-viewer`로 창을 열어 "번역 시작"을 직접 눌러 보도록 안내한다. 저장소에는 커밋하지 않는다.
