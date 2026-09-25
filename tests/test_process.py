@@ -79,3 +79,17 @@ def test_job_assign_failure_kills_process_and_closes_log(tmp_path):
     assert not server.running
     log_path.unlink()
     log_path.write_bytes(b"")
+
+
+def test_health_check_ignores_proxy_environment(tmp_path, monkeypatch):
+    # A dead proxy: if httpx honoured it, /health would never succeed.
+    for name in ("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    server = fake_server(tmp_path, ready_after=0.2)
+    server.start(timeout=10)
+    try:
+        assert server.is_healthy()
+    finally:
+        server.stop()

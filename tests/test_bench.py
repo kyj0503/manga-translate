@@ -101,3 +101,41 @@ def test_write_outputs(tmp_path):
     assert data["meta"] == {"model_id": "m", "folder": str(tmp_path), "with_image": False}
     assert data["summary"]["pages"] == 1
     assert data["pages"][0]["bubbles"] == [{"id": 0, "box": [0, 0, 10, 10], "ja": "a", "ko": "ko:a"}]
+
+
+def test_textless_page_does_not_take_a_context_slot():
+    vision = FakeVision({"1.png": page("a"), "2.png": page(), "3.png": page("b"), "4.png": page("c")})
+    translator = FakeTranslator()
+    run_bench([Path("1.png"), Path("2.png"), Path("3.png"), Path("4.png")], vision, translator, [])
+    assert translator.calls[3]["context"] == [[("a", "ko:a")], [("b", "ko:b")]]
+
+
+def test_unreadable_page_is_skipped_via_on_error():
+    class BrokenVision(FakeVision):
+        def analyze(self, path):
+            if Path(path).name == "2.png":
+                raise OSError("cannot identify image file")
+            return super().analyze(path)
+
+    vision = BrokenVision({"1.png": page("a"), "3.png": page("b")})
+    errors = []
+    results = run_bench(
+        [Path("1.png"), Path("2.png"), Path("3.png")],
+        vision,
+        FakeTranslator(),
+        [],
+        on_error=lambda path, exc: errors.append((path.name, str(exc))),
+    )
+    assert [r.image_path.name for r in results] == ["1.png", "3.png"]
+    assert errors == [("2.png", "cannot identify image file")]
+
+
+def test_without_on_error_the_exception_propagates():
+    import pytest
+
+    class BrokenVision:
+        def analyze(self, path):
+            raise OSError("broken")
+
+    with pytest.raises(OSError):
+        run_bench([Path("1.png")], BrokenVision(), FakeTranslator(), [])

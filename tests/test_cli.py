@@ -1,6 +1,18 @@
+import os
+import subprocess
+import sys
+
 import pytest
 
 from manga_viewer.cli import main
+
+
+def model_files(tmp_path):
+    exe = tmp_path / "llama-server.exe"
+    model = tmp_path / "m.gguf"
+    exe.write_bytes(b"")
+    model.write_bytes(b"")
+    return ["--llama-server", str(exe), "--model", str(model)]
 
 
 def test_bench_requires_llama_server_and_model(tmp_path):
@@ -9,70 +21,119 @@ def test_bench_requires_llama_server_and_model(tmp_path):
 
 
 def test_bench_with_empty_folder_returns_error(tmp_path, capsys):
-    code = main(["bench", str(tmp_path), "--llama-server", "x.exe", "--model", "m.gguf"])
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    code = main(["bench", str(pages), *model_files(tmp_path)])
     assert code == 2
     assert "이미지가 없습니다" in capsys.readouterr().out
 
 
+def test_missing_folder_returns_error(tmp_path, capsys):
+    code = main(["bench", str(tmp_path / "nope"), *model_files(tmp_path)])
+    assert code == 2
+    assert "폴더가 없습니다" in capsys.readouterr().out
+
+
+def test_limit_must_be_positive(tmp_path):
+    with pytest.raises(SystemExit):
+        main(["bench", str(tmp_path), *model_files(tmp_path), "--limit", "0"])
+
+
+def test_missing_model_file_returns_error(tmp_path, capsys):
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "1.png").write_bytes(b"")
+    exe = tmp_path / "llama-server.exe"
+    exe.write_bytes(b"")
+    code = main(["bench", str(pages), "--llama-server", str(exe), "--model", str(tmp_path / "missing.gguf")])
+    assert code == 2
+    assert "모델 파일이 없습니다" in capsys.readouterr().out
+
+
 def test_with_image_requires_mmproj(tmp_path, capsys):
-    (tmp_path / "1.png").write_bytes(b"")
-    code = main(["bench", str(tmp_path), "--llama-server", "x.exe", "--model", "m.gguf", "--with-image"])
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "1.png").write_bytes(b"")
+    code = main(["bench", str(pages), *model_files(tmp_path), "--with-image"])
     assert code == 2
     assert "--mmproj" in capsys.readouterr().out
 
 
-def test_bench_closes_client_even_if_vision_fails(tmp_path, monkeypatch, capsys):
-    """Regression test: client must be closed in finally block, not after run_bench."""
-    from PIL import Image
-
-    # Create a real PNG image
-    Image.new("RGB", (10, 10), "white").save(tmp_path / "1.png")
-
-    # Record calls to cleanup methods
-    calls = {"server_stop": [], "client_close": [], "job_close": []}
+def fake_pipeline(monkeypatch, calls, *, vision_factory, start_error=None):
+    """Patch the names _pipeline imports lazily so no GPU, server or model is needed."""
+    import manga_viewer.llm.client
+    import manga_viewer.llm.llama
+    import manga_viewer.vision
+    import manga_viewer.winjob
 
     class FakeServer:
         def stop(self):
-            calls["server_stop"].append(True)
+            calls.append("server.stop")
 
     class FakeJob:
         def close(self):
-            calls["job_close"].append(True)
+            calls.append("job.close")
 
     class FakeClient:
         def __init__(self, base_url):
-            self.base_url = base_url
+            calls.append("client.open")
 
         def close(self):
-            calls["client_close"].append(True)
+            calls.append("client.close")
 
-    class FakeVision:
-        def __init__(self):
-            pass
+    def fake_start(*args, **kwargs):
+        if start_error is not None:
+            raise start_error
+        return FakeServer(), "http://x"
 
-        def analyze(self, path):
-            raise RuntimeError("boom")
-
-    def fake_start_llama_server(*args, **kwargs):
-        return (FakeServer(), "http://x")
-
-    # Patch the lazy-imported names on their modules
-    import manga_viewer.llm.llama
-    import manga_viewer.winjob
-    import manga_viewer.llm.client
-    import manga_viewer.vision
-
-    monkeypatch.setattr(manga_viewer.llm.llama, "start_llama_server", fake_start_llama_server)
+    monkeypatch.setattr(manga_viewer.llm.llama, "start_llama_server", fake_start)
     monkeypatch.setattr(manga_viewer.winjob, "KillOnCloseJob", FakeJob)
     monkeypatch.setattr(manga_viewer.llm.client, "ChatClient", FakeClient)
-    monkeypatch.setattr(manga_viewer.vision, "Vision", FakeVision)
+    monkeypatch.setattr(manga_viewer.vision, "Vision", vision_factory)
 
-    # Should raise RuntimeError from Vision.analyze
+
+def test_pipeline_cleans_up_when_vision_fails_to_load(tmp_path, monkeypatch, capsys):
+    from PIL import Image
+
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    Image.new("RGB", (10, 10), "white").save(pages / "1.png")
+    calls = []
+
+    def broken_vision():
+        raise RuntimeError("boom")
+
+    fake_pipeline(monkeypatch, calls, vision_factory=broken_vision)
     with pytest.raises(RuntimeError, match="boom"):
-        main(["bench", str(tmp_path), "--llama-server", "x.exe", "--model", "m.gguf"])
+        main(["bench", str(pages), *model_files(tmp_path), "--out", str(tmp_path / "out")])
+    assert calls == ["client.open", "client.close", "server.stop", "job.close"]
 
-    # All cleanup methods must have been called
-    capsys.readouterr()  # Clear captured output
-    assert calls["client_close"] == [True], "client.close() not called"
-    assert calls["server_stop"] == [True], "server.stop() not called"
-    assert calls["job_close"] == [True], "job.close() not called"
+
+def test_server_start_failure_is_a_user_error(tmp_path, monkeypatch, capsys):
+    from PIL import Image
+
+    from manga_viewer.llm.process import ServerStartError
+
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    Image.new("RGB", (10, 10), "white").save(pages / "1.png")
+    calls = []
+    fake_pipeline(monkeypatch, calls, vision_factory=object, start_error=ServerStartError("no gpu"))
+    code = main(["bench", str(pages), *model_files(tmp_path), "--out", str(tmp_path / "out")])
+    assert code == 2
+    assert "LLM 서버를 시작하지 못했습니다" in capsys.readouterr().out
+    assert calls == ["job.close"]
+
+
+def test_output_survives_non_cp949_characters(tmp_path):
+    folder = tmp_path / "気"  # not encodable in cp949
+    folder.mkdir()
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
+    code = (
+        "import sys\n"
+        "from manga_viewer.cli import main\n"
+        f"sys.exit(main(['bench', {str(folder)!r}, '--llama-server', 'x', '--model', 'm']))\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env)
+    assert result.returncode == 2, result.stderr.decode("utf-8", "replace")
+    assert "気" in result.stdout.decode("utf-8")

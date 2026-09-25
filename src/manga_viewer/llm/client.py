@@ -27,7 +27,8 @@ class ChatClient:
         timeout: float = 120.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self._http = httpx.Client(base_url=base_url, timeout=timeout, transport=transport)
+        # trust_env=False: never route loopback traffic through a system proxy.
+        self._http = httpx.Client(base_url=base_url, timeout=timeout, transport=transport, trust_env=False)
 
     def chat_json(
         self,

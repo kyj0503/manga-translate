@@ -78,7 +78,8 @@ class ManagedServer:
 
     def is_healthy(self) -> bool:
         try:
-            return httpx.get(self._health_url, timeout=2.0).status_code == 200
+            # trust_env=False: never route loopback traffic through a system proxy.
+            return httpx.get(self._health_url, timeout=2.0, trust_env=False).status_code == 200
         except httpx.HTTPError:
             return False
 

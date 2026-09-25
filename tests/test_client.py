@@ -64,3 +64,35 @@ def test_connection_error_raises_llm_error():
 
     with pytest.raises(LLMError):
         client_with(handler).chat_json([], SCHEMA)
+
+
+def test_real_http_ignores_proxy_environment(monkeypatch):
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    body = json.dumps(completion('{"a": 7}')).encode()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    for name in ("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    try:
+        client = ChatClient(f"http://127.0.0.1:{server.server_address[1]}", timeout=5)
+        assert client.chat_json([], SCHEMA).content == {"a": 7}
+        client.close()
+    finally:
+        server.shutdown()

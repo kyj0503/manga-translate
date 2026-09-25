@@ -53,19 +53,26 @@ def run_bench(
     glossary: Sequence[GlossaryEntry],
     on_page: Callable[[PageResult], None] | None = None,
     with_image: bool = False,
+    on_error: Callable[[Path, Exception], None] | None = None,
 ) -> list[PageResult]:
     results: list[PageResult] = []
     context: deque[ContextPage] = deque(maxlen=CONTEXT_PAGES)
     for path in image_paths:
         start = time.perf_counter()
-        analysis = vision.analyze(path)
-        vision_s = time.perf_counter() - start
+        try:
+            analysis = vision.analyze(path)
+            vision_s = time.perf_counter() - start
+            page_image = image_data_url(path) if with_image and analysis.blocks else None
+        except Exception as exc:  # unreadable or corrupt page: skip it and keep going
+            if on_error is None:
+                raise
+            on_error(path, exc)
+            continue
 
-        page_image = image_data_url(path) if with_image and analysis.blocks else None
         translation = translator.translate_page(analysis.blocks, list(context), glossary, page_image)
-        context.append(
-            [(b.ja, translation.translations[b.id]) for b in analysis.blocks if b.id in translation.translations]
-        )
+        pairs = [(b.ja, translation.translations[b.id]) for b in analysis.blocks if b.id in translation.translations]
+        if pairs:  # pages without dialogue must not push real dialogue out of the window
+            context.append(pairs)
 
         result = PageResult(path, analysis, translation, vision_s)
         results.append(result)
