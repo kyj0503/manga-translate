@@ -133,6 +133,45 @@ def test_stage_pages_avoids_name_collisions_across_subfolders(tmp_path):
     assert (tmp_path / "out" / "b" / "001.png").read_bytes() == b"b-out"
 
 
+def test_collect_staged_results_same_stem_different_extension_does_not_collide(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "001.jpg").write_bytes(b"jpg")
+    (src / "001.png").write_bytes(b"png")
+    images = [src / "001.jpg", src / "001.png"]
+    exec_dir = tmp_path / "work" / "pages"
+
+    staged = stage_pages(images, src, exec_dir)
+    (exec_dir / "result").mkdir()
+    (exec_dir / "result" / "00001_001.png").write_bytes(b"jpg-out")
+    (exec_dir / "result" / "00002_001.png").write_bytes(b"png-out")
+
+    saved, missing = collect_staged_results(exec_dir, tmp_path / "out", staged)
+
+    assert missing == []
+    assert saved == [tmp_path / "out" / "001_jpg.png", tmp_path / "out" / "001_png.png"]
+    assert (tmp_path / "out" / "001_jpg.png").read_bytes() == b"jpg-out"
+    assert (tmp_path / "out" / "001_png.png").read_bytes() == b"png-out"
+
+
+def test_collect_staged_results_dotted_name_round_trips(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "vol.1.webp").write_bytes(b"img")
+    images = [src / "vol.1.webp"]
+    exec_dir = tmp_path / "work" / "pages"
+
+    staged = stage_pages(images, src, exec_dir)
+    (exec_dir / "result").mkdir()
+    (exec_dir / "result" / "00001_vol.1.png").write_bytes(b"typeset")
+
+    saved, missing = collect_staged_results(exec_dir, tmp_path / "out", staged)
+
+    assert missing == []
+    assert saved == [tmp_path / "out" / "vol.1.png"]
+    assert (tmp_path / "out" / "vol.1.png").read_bytes() == b"typeset"
+
+
 def test_run_streaming_passes_output_stdin_and_cwd(tmp_path):
     lines = []
     code = run_streaming(

@@ -66,6 +66,13 @@ def collect_staged_results(
             if path.is_file():
                 result_by_stem[Path(path.name).stem] = path
 
+    # A page collides with another when they'd land on the same output name: same
+    # folder, same source stem, compared case-insensitively.
+    dir_stem_counts: dict[tuple[Path, str], int] = {}
+    for page in staged:
+        key = (page.relative_dir, page.source.stem.lower())
+        dir_stem_counts[key] = dir_stem_counts.get(key, 0) + 1
+
     saved = []
     missing = []
     for page in staged:
@@ -75,7 +82,12 @@ def collect_staged_results(
             continue
         target_dir = output_dir / page.relative_dir
         target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / f"{page.source.stem}{result_file.suffix}"
+        key = (page.relative_dir, page.source.stem.lower())
+        if dir_stem_counts[key] > 1:
+            output_name = f"{page.source.stem}_{page.source.suffix[1:].lower()}{result_file.suffix}"
+        else:
+            output_name = f"{page.source.stem}{result_file.suffix}"
+        target = target_dir / output_name
         shutil.copy2(result_file, target)
         saved.append(target)
     return saved, missing
