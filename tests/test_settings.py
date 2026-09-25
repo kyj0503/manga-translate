@@ -4,11 +4,11 @@ from manga_translate.settings import Settings, load_settings, save_settings
 
 
 def test_roundtrip(tmp_path):
-    path = tmp_path / "sub" / "settings.json"
-    settings = Settings(llama_server="C:/l.exe", model="C:/모델.gguf", uv="C:/uv.exe", last_input="D:/만화")
+    path = tmp_path / "settings.json"
+    settings = Settings(model="C:/모델.gguf", last_input="D:/만화", last_output="D:/만화_번역")
     save_settings(settings, path)
     assert load_settings(path) == settings
-    assert "모델" in path.read_text(encoding="utf-8")  # stored as readable UTF-8
+    assert "모델" in path.read_text(encoding="utf-8")
 
 
 def test_missing_or_corrupt_file_gives_defaults(tmp_path):
@@ -18,7 +18,7 @@ def test_missing_or_corrupt_file_gives_defaults(tmp_path):
     assert load_settings(bad) == Settings()
 
 
-def test_unknown_keys_are_ignored(tmp_path):
+def test_old_and_unknown_keys_are_ignored(tmp_path):
     path = tmp_path / "s.json"
-    path.write_text(json.dumps({"model": "m.gguf", "future_option": 1}), encoding="utf-8")
+    path.write_text(json.dumps({"model": "m.gguf", "llama_server": "x", "engine_dir": "y", "uv": "z"}), encoding="utf-8")
     assert load_settings(path) == Settings(model="m.gguf")

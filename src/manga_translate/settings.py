@@ -2,24 +2,15 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 
 @dataclass
 class Settings:
-    llama_server: str = ""
-    model: str = ""
-    engine_dir: str = ""
-    uv: str = ""
+    model: str = ""  # a GGUF the user picked; empty means the installed default model
     last_input: str = ""
     last_output: str = ""
-
-
-def default_settings_path() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    return Path(base) / "manga-translate" / "settings.json"
 
 
 def load_settings(path: Path) -> Settings:
