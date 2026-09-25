@@ -1,53 +1,44 @@
 # manga-translate
 
 일본 만화 이미지 폴더를 로컬 LLM으로 한국어로 번역해, 말풍선을 지우고 한국어를 식자한 이미지를 저장하는 Windows 프로그램입니다.
-검출·OCR·인페인팅·식자는 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator)가, 번역은 로컬
-[llama.cpp](https://github.com/ggml-org/llama.cpp) 서버(Gemma 4 등 GGUF 모델)가 맡습니다.
+검출·OCR·인페인팅·식자는 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator)가, 번역은
+[llama.cpp](https://github.com/ggml-org/llama.cpp)의 llama-server와 Gemma 4 모델이 맡습니다. 필요한 것은 모두 프로그램 창에서 설치합니다.
 
-## 1. 요구 사항
+## 요구 사항
 
-- Windows 10/11
-- NVIDIA RTX 30 시리즈 이상 그래픽카드
-- [uv](https://docs.astral.sh/uv/)
-- [Git for Windows](https://git-scm.com/download/win)
+- Windows 10/11, NVIDIA RTX 30 시리즈 이상 그래픽카드
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- 여유 디스크 공간 약 12GB
 
-## 2. 코드 받기
+## 설치
 
 ```powershell
 git clone https://github.com/kyj0503/manga-translate.git
 cd manga-translate
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 ```
 
-## 3. llama.cpp 받기
+`%USERPROFILE%\Downloads\manga-translate`에 프로그램 폴더가 만들어집니다. 다른 곳에 만들려면 `-Dest <폴더>`를 붙입니다.
+프로그램이 받는 파일(엔진, llama.cpp, 모델, 설정)은 모두 이 폴더 안에만 저장됩니다.
 
-[llama.cpp 릴리스 페이지](https://github.com/ggml-org/llama.cpp/releases)에서 아래 두 파일을 받아 **같은 폴더**에
-압축을 풉니다.
+## 사용법
 
-- `llama-<태그>-bin-win-cuda-12.4-x64.zip`
-- `cudart-llama-bin-win-cuda-12.4-x64.zip`
+1. 프로그램 폴더의 `manga-translate` 바로가기를 실행합니다.
+2. "구성 요소"의 세 줄에서 각각 "설치"를 누릅니다.
+   - 번역 엔진: 약 6GB, 수십 분 걸릴 수 있습니다.
+   - llama.cpp: 약 0.6GB
+   - 번역 모델(Gemma 4 E4B): 약 5GB
+3. 입력 폴더와 출력 폴더를 고르고 "번역 시작"을 누릅니다. 원본 폴더는 건드리지 않습니다.
 
-`--reasoning-budget` 옵션이 필요하므로, 태그가 **b11177 이상**인 빌드를 받아야 합니다.
+설치나 번역 중에 "중단"을 누르면 멈춥니다. 설치는 다시 "설치"를 누르면 받던 곳부터 이어서 진행하고,
+번역은 그때까지 완성된 페이지를 출력 폴더에 남깁니다. 다른 GGUF 모델을 쓰려면 "변경..."으로 고릅니다.
 
-## 4. 번역 모델 받기
-
-[unsloth/gemma-4-E4B-it-GGUF](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF)에서
-`gemma-4-E4B-it-Q4_K_M.gguf` 파일(약 5GB)을 받습니다. 이 GGUF 파일 하나면 충분하고, mmproj 파일은 필요 없습니다.
-
-## 5. 실행
+## 개발
 
 ```powershell
 uv sync
-uv run manga-translate
+uv run pytest
 ```
-
-처음 켰을 때 "엔진 설치"를 누르면 BallonsTranslator 전용 Python 환경(CUDA용 PyTorch 포함)과 검출·OCR·인페인팅 모델
-(약 785MB)을 합쳐 약 6GB를 받습니다. 수십 분 걸릴 수 있으니, 설치가 끝날 때까지 창을 닫지 마세요.
-
-## 6. 사용법
-
-1. 위에서 받은 번역 모델(GGUF)과 `llama-server.exe`를 고릅니다.
-2. 입력 폴더(번역할 만화 이미지가 있는 폴더)와 출력 폴더를 고릅니다. 입력 폴더는 건드리지 않습니다.
-3. "번역 시작"을 누릅니다.
 
 ## 라이선스
 
