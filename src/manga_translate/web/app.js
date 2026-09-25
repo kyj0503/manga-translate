@@ -93,7 +93,9 @@ function renderSetup() {
       const actions = document.createElement("td");
       actions.append(makeButton("설치", () => act(`/api/install/${c.key}`), busy || c.ready));
       if (c.key === "model") {
-        actions.append(makeButton("변경...", () => act("/api/model"), busy || appState.runtime !== "stopped"));
+        actions.append(
+          makeButton("변경...", () => act("/api/model"), busy || appState.runtime === "ready" || appState.runtime === "starting")
+        );
       }
       row.append(label, status, actions);
       return row;
