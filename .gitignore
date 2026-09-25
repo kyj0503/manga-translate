@@ -19,3 +19,6 @@ manga-data/
 /downloads/
 /tools/
 /work/
+
+# Experiment results and samples stay local
+docs/superpowers/notes/

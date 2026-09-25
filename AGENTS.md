@@ -26,6 +26,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 ### 그 밖의 규칙
 
 - 테스트: `uv run pytest`가 모두 통과해야 한다.
+- 실험 결과(출력 이미지, 로그, 벤치마크 기록)와 샘플 이미지는 git으로 추적하지 않는다. `bench-out/`, `manga-data/`, `.dev/`, `docs/superpowers/notes/`처럼 `.gitignore`에 있는 곳에만 둔다.
 - 빌드, 실행, 테스트는 이 PC에서 직접 한다. WSL이나 Docker는 쓰지 않는다.
 - 프로그램이 받거나 만드는 파일(엔진, llama.cpp, 모델, 설정, uv 캐시, 작업 폴더)은 모두 프로그램 폴더 안에만 둔다. `%LOCALAPPDATA%` 같은 다른 곳에 폴더를 만들지 않는다.
 - GUI 프로그램만 유지한다. CLI를 추가하지 않는다.
