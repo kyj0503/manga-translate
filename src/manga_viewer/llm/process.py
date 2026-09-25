@@ -47,14 +47,21 @@ class ManagedServer:
     def start(self, timeout: float = 180.0, poll_interval: float = 0.25) -> None:
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log = self._log_path.open("ab")
-        self._proc = subprocess.Popen(
-            self._argv,
-            stdout=self._log,
-            stderr=subprocess.STDOUT,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        if self._job is not None:
-            self._job.assign(self._proc.pid)
+        try:
+            self._proc = subprocess.Popen(
+                self._argv,
+                stdout=self._log,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if self._job is not None:
+                self._job.assign(self._proc.pid)
+        except BaseException:
+            if self._proc is not None and self._proc.poll() is None:
+                self._proc.kill()
+                self._proc.wait()
+            self._close_log()
+            raise
 
         deadline = time.monotonic() + timeout
         while True:

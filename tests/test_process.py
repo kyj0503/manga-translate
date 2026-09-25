@@ -45,3 +45,37 @@ def test_timeout_stops_process(tmp_path):
     with pytest.raises(ServerStartError, match="시간"):
         server.start(timeout=1.5)
     assert not server.running
+
+
+def test_missing_executable_closes_log_and_leaves_no_process(tmp_path):
+    log_path = tmp_path / "server.log"
+    server = ManagedServer(
+        [str(tmp_path / "does-not-exist.exe")],
+        health_url=f"http://127.0.0.1:{free_port()}/health",
+        log_path=log_path,
+    )
+    with pytest.raises(FileNotFoundError):
+        server.start(timeout=5)
+    assert not server.running
+    # The log handle must have been closed, or deleting/reopening it would fail on Windows.
+    log_path.unlink()
+    log_path.write_bytes(b"")
+
+
+def test_job_assign_failure_kills_process_and_closes_log(tmp_path):
+    class FailingJob:
+        def assign(self, pid):
+            raise OSError("boom")
+
+    log_path = tmp_path / "server.log"
+    server = ManagedServer(
+        [PYTHON, "-c", "import time; time.sleep(120)"],
+        health_url=f"http://127.0.0.1:{free_port()}/health",
+        log_path=log_path,
+        job=FailingJob(),
+    )
+    with pytest.raises(OSError, match="boom"):
+        server.start(timeout=5)
+    assert not server.running
+    log_path.unlink()
+    log_path.write_bytes(b"")
