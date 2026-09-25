@@ -10,3 +10,11 @@ dist/
 .dev/
 bench-out/
 manga-data/
+
+# Program-folder data created when the app runs from the source tree
+/settings.json
+/engine/
+/runtime/
+/models/
+/downloads/
+/tools/
