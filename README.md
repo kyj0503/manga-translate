@@ -19,7 +19,9 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 ```
 
 `%USERPROFILE%\Downloads\manga-translate`에 프로그램 폴더가 만들어집니다. 다른 곳에 만들려면 `-Dest <폴더>`를 붙입니다.
-프로그램이 받는 파일(엔진, llama.cpp, 모델, 설정)은 모두 이 폴더 안에만 저장됩니다.
+프로그램이 받는 파일(엔진, llama.cpp, 모델, 설정)은 모두 이 폴더 안에만 저장됩니다. 엔진을 설치할 때 쓰는 uv의
+캐시와 관리형 Python, 번역 중 임시 작업 폴더도 모두 이 프로그램 폴더 안에 남으므로, 폴더를 지우면 전부 함께
+지워집니다.
 
 ## 사용법
 
