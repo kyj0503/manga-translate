@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 이미지 폴더를 입력받아 텍스트 검출 → OCR → 읽기 순서 정렬 → 로컬 LLM 번역을 수행하고, 번역 결과와 속도를 HTML 리포트로 출력하는 `manga-viewer bench` 명령을 만든다. 이 도구로 기본 번역 모델을 확정한다.
+**Goal:** 이미지 폴더를 입력받아 텍스트 검출 → OCR → 읽기 순서 정렬 → 로컬 LLM 번역을 수행하고, 번역 결과와 속도를 HTML 리포트로 출력하는 `manga-viewer bench` 명령을 만든다. 이 도구로 Gemma 4 E2B / E4B / 12B를 텍스트 전용과 "페이지 이미지 참고" 두 방식으로 비교해 기본 모델과 이미지 사용 여부를 확정한다.
 
 **Architecture:** `src/manga_viewer/` 패키지에 순수 로직 모듈(`order`, `background`, `source`, `glossary`, `translate`)과 외부 연동 모듈(`vision`은 mokuro, `llm/`은 llama-server, `winjob`은 Windows Job Object)을 분리한다. 무거운 의존성(PyTorch, mokuro)은 `engine` extra로 분리하고 `vision.Vision` 생성 시점에만 import한다. 이 구조는 계획 3에서 "가벼운 venv 먼저, 무거운 의존성은 마법사가 설치" 방식과 맞물린다.
 
@@ -13,12 +13,15 @@
 ## Global Constraints
 
 - 대상 OS: Windows 10/11. `winjob`은 Windows 전용이며 다른 OS에서는 테스트를 skip한다.
+- 빌드, 실행, 테스트는 모두 개발자 PC의 네이티브 Windows(PowerShell)에서 한다. **WSL과 Docker는 쓰지 않는다.**
 - GPU: NVIDIA RTX 30 시리즈 이상, VRAM 12GB 이상.
 - Python: `>=3.12,<3.13`.
 - 무거운 의존성(`mokuro`, `torch`, `torchvision`)은 `engine` extra에만 둔다. 기본 의존성과 `vision.py`를 제외한 모듈은 이것들을 import하지 않는다.
 - llama-server는 `127.0.0.1`에만 바인딩한다.
 - LLM 응답은 `response_format`의 `json_schema`로 강제하고, 스키마는 `{"translations": [{"id": int, "ko": str}]}`이다.
 - temperature 기본값은 0.3, 이전 페이지 문맥은 2페이지.
+- 번역 모델 후보는 Gemma 4 제품군(E2B 1순위, E4B, 12B) GGUF Q4_K_M이다. 이미지 입력에는 같은 저장소의 mmproj 파일을 llama-server `--mmproj`로 함께 올린다.
+- 페이지 이미지는 LLM에 **참고 자료로만** 넣는다. 박스와 원문은 항상 검출기와 manga-ocr에서 오고, 번역 출력 형식도 같다.
 - 누락 id 또는 LLM 오류는 1회만 재요청한다. 그래도 실패한 말풍선은 `failed_ids`로 보고한다.
 - 샘플 만화, 모델, llama.cpp 바이너리는 저장소에 커밋하지 않는다(`.dev/` 아래에 두고 gitignore).
 - 사용자에게 보이는 CLI 문구는 한국어로 쓴다.
@@ -43,6 +46,7 @@
 | `src/manga_viewer/llm/client.py` | OpenAI 호환 JSON 스키마 채팅 클라이언트 |
 | `src/manga_viewer/translate.py` | 프롬프트, 응답 파싱, 재요청 |
 | `src/manga_viewer/vision.py` | mokuro 결과 → `PageAnalysis` |
+| `src/manga_viewer/page_image.py` | 페이지 이미지를 축소해 LLM용 data URL로 변환 |
 | `src/manga_viewer/bench.py` | bench 실행 루프, 요약, HTML/JSON 출력 |
 | `src/manga_viewer/cli.py` | `manga-viewer bench` 명령 |
 | `tests/helpers/job_parent.py` | Job 테스트용 부모 프로세스 |
@@ -775,8 +779,8 @@ git commit -m "feat: add kill-on-close Windows job object"
   - `class ServerStartError(RuntimeError)`
   - `free_port() -> int`
   - `class ManagedServer(argv: list[str], health_url: str, log_path: Path, job: KillOnCloseJob | None = None)` with `start(timeout: float = 180.0, poll_interval: float = 0.25) -> None`, `is_healthy() -> bool`, `stop(timeout: float = 10.0) -> None`, `running: bool`(property)
-  - `@dataclass(frozen=True) LlamaConfig(exe: Path, model: Path, ctx_size: int = 8192, n_gpu_layers: int = 999)`
-  - `build_llama_args(cfg: LlamaConfig, port: int) -> list[str]`
+  - `@dataclass(frozen=True) LlamaConfig(exe: Path, model: Path, mmproj: Path | None = None, ctx_size: int = 8192, n_gpu_layers: int = 999)`
+  - `build_llama_args(cfg: LlamaConfig, port: int) -> list[str]` (`mmproj`가 있으면 `--mmproj <path>`를 붙인다)
   - `start_llama_server(cfg: LlamaConfig, log_path: Path, job: KillOnCloseJob | None = None, timeout: float = 300.0) -> tuple[ManagedServer, str]` (두 번째 값은 `http://127.0.0.1:<port>`)
 
 - [ ] **Step 1: 가짜 서버 헬퍼 작성**
@@ -885,6 +889,17 @@ def test_build_llama_args():
     assert "-c 8192" in joined
     assert "-ngl 999" in joined
     assert "--parallel 1" in joined
+    assert "--mmproj" not in args
+
+
+def test_build_llama_args_with_mmproj():
+    cfg = LlamaConfig(
+        exe=Path("C:/x/llama-server.exe"),
+        model=Path("C:/m/model.gguf"),
+        mmproj=Path("C:/m/mmproj.gguf"),
+    )
+    args = build_llama_args(cfg, port=5555)
+    assert args[args.index("--mmproj") + 1] == str(Path("C:/m/mmproj.gguf"))
 ```
 
 - [ ] **Step 3: 실패 확인**
@@ -1015,12 +1030,13 @@ from .process import ManagedServer, free_port
 class LlamaConfig:
     exe: Path
     model: Path
+    mmproj: Path | None = None  # vision projector; required for image input
     ctx_size: int = 8192
     n_gpu_layers: int = 999
 
 
 def build_llama_args(cfg: LlamaConfig, port: int) -> list[str]:
-    return [
+    args = [
         str(cfg.exe),
         "-m", str(cfg.model),
         "--host", "127.0.0.1",
@@ -1029,6 +1045,9 @@ def build_llama_args(cfg: LlamaConfig, port: int) -> list[str]:
         "-ngl", str(cfg.n_gpu_layers),
         "--parallel", "1",
     ]
+    if cfg.mmproj is not None:
+        args += ["--mmproj", str(cfg.mmproj)]
+    return args
 
 
 def start_llama_server(
@@ -1047,7 +1066,7 @@ def start_llama_server(
 - [ ] **Step 5: 통과 확인**
 
 Run: `uv run pytest tests/test_process.py tests/test_llama.py -v`
-Expected: 4 passed
+Expected: 5 passed
 
 - [ ] **Step 6: Commit**
 
@@ -1255,10 +1274,10 @@ git commit -m "feat: add schema-constrained chat client for llama-server"
 - Produces:
   - `PROMPT_VERSION = 1`, `SYSTEM_PROMPT: str`, `RESPONSE_SCHEMA: dict`
   - `ContextPage = list[tuple[str, str]]`: 이전 한 페이지의 (원문, 번역) 쌍 목록
-  - `build_messages(blocks: Sequence[TextBlock], context_pages: Sequence[ContextPage], glossary: Sequence[GlossaryEntry]) -> list[dict]`
+  - `build_messages(blocks: Sequence[TextBlock], context_pages: Sequence[ContextPage], glossary: Sequence[GlossaryEntry], page_image: str | None = None) -> list[dict]`. `page_image`는 data URL이다. 주어지면 user 메시지의 content가 `[{"type": "image_url", ...}, {"type": "text", ...}]` 목록이 되고, 없으면 JSON 문자열 하나다.
   - `parse_translations(content: dict, expected_ids: set[int]) -> dict[int, str]`
   - `@dataclass(frozen=True) PageTranslation(translations: dict[int, str], failed_ids: tuple[int, ...], completion_tokens: int, tokens_per_second: float | None, elapsed_s: float)`
-  - `class Translator(client, *, temperature: float = 0.3, extra_body: dict | None = None)` with `translate_page(blocks: Sequence[TextBlock], context_pages: Sequence[ContextPage] = (), glossary: Sequence[GlossaryEntry] = ()) -> PageTranslation`. `client`는 `chat_json(messages, schema, *, temperature, extra_body) -> ChatResult`를 가진 객체다.
+  - `class Translator(client, *, temperature: float = 0.3, extra_body: dict | None = None)` with `translate_page(blocks: Sequence[TextBlock], context_pages: Sequence[ContextPage] = (), glossary: Sequence[GlossaryEntry] = (), page_image: str | None = None) -> PageTranslation`. `client`는 `chat_json(messages, schema, *, temperature, extra_body) -> ChatResult`를 가진 객체다. 재요청에도 같은 `page_image`를 넣는다.
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -1297,7 +1316,10 @@ class FakeClient:
         return ChatResult(content=item, completion_tokens=10, tokens_per_second=35.0)
 
     def payload(self, call_index):
-        return json.loads(self.calls[call_index]["messages"][1]["content"])
+        content = self.calls[call_index]["messages"][1]["content"]
+        if isinstance(content, list):  # image + text parts
+            content = next(p["text"] for p in content if p["type"] == "text")
+        return json.loads(content)
 
 
 def test_build_messages_payload_keeps_japanese():
@@ -1391,6 +1413,24 @@ def test_only_relevant_glossary_and_extra_body_are_sent():
     )
     assert client.payload(0)["glossary"] == [{"ja": "悟", "ko": "사토루", "note": ""}]
     assert client.calls[0]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def test_build_messages_with_page_image():
+    messages = build_messages([blk(0, "行くぞ")], [], [], page_image="data:image/jpeg;base64,AAAA")
+    parts = messages[1]["content"]
+    assert parts[0] == {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAA"}}
+    assert parts[1]["type"] == "text"
+    assert json.loads(parts[1]["text"])["bubbles"] == [{"id": 0, "ja": "行くぞ"}]
+
+
+def test_page_image_is_sent_on_retry_too():
+    client = FakeClient(
+        {"translations": [{"id": 0, "ko": "가자"}]},
+        {"translations": [{"id": 1, "ko": "응"}]},
+    )
+    Translator(client).translate_page([blk(0, "行くぞ"), blk(1, "うん")], page_image="data:image/jpeg;base64,AAAA")
+    for call in client.calls:
+        assert call["messages"][1]["content"][0]["type"] == "image_url"
 ```
 
 - [ ] **Step 2: 실패 확인**
@@ -1424,6 +1464,7 @@ Rules:
 - Write natural spoken Korean, not a literal translation. Keep it short enough to fit in a speech bubble.
 - Translate sound effects briefly as Korean onomatopoeia.
 - Always use the "glossary" translation for listed terms.
+- If a page image is attached, use it only as context (who is speaking, expressions, mood). Translate exactly the given bubbles; do not add text you see in the image.
 - Output only the JSON object."""
 
 RESPONSE_SCHEMA: dict = {
@@ -1472,15 +1513,23 @@ def build_messages(
     blocks: Sequence[TextBlock],
     context_pages: Sequence[ContextPage],
     glossary: Sequence[GlossaryEntry],
+    page_image: str | None = None,
 ) -> list[dict]:
     payload = {
         "glossary": [{"ja": e.ja, "ko": e.ko, "note": e.note} for e in glossary],
         "previous_pages": [[{"ja": ja, "ko": ko} for ja, ko in page] for page in context_pages],
         "bubbles": [{"id": b.id, "ja": b.ja} for b in blocks],
     }
+    text = json.dumps(payload, ensure_ascii=False)
+    user_content: str | list[dict] = text
+    if page_image is not None:
+        user_content = [
+            {"type": "image_url", "image_url": {"url": page_image}},
+            {"type": "text", "text": text},
+        ]
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        {"role": "user", "content": user_content},
     ]
 
 
@@ -1512,6 +1561,7 @@ class Translator:
         blocks: Sequence[TextBlock],
         context_pages: Sequence[ContextPage] = (),
         glossary: Sequence[GlossaryEntry] = (),
+        page_image: str | None = None,
     ) -> PageTranslation:
         start = time.perf_counter()
         translations: dict[int, str] = {}
@@ -1525,7 +1575,7 @@ class Translator:
                 break
             try:
                 result = self._client.chat_json(
-                    build_messages(pending, context_pages, relevant),
+                    build_messages(pending, context_pages, relevant, page_image),
                     RESPONSE_SCHEMA,
                     temperature=self._temperature,
                     extra_body=self._extra_body,
@@ -1549,7 +1599,7 @@ class Translator:
 - [ ] **Step 4: 통과 확인**
 
 Run: `uv run pytest tests/test_translate.py -v`
-Expected: 9 passed
+Expected: 11 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1714,22 +1764,55 @@ git commit -m "feat: add mokuro-based text detection and OCR adapter"
 ### Task 9: bench 실행 루프, 리포트, CLI
 
 **Files:**
-- Create: `src/manga_viewer/bench.py`, `src/manga_viewer/cli.py`
-- Test: `tests/test_bench.py`, `tests/test_cli.py`
+- Create: `src/manga_viewer/page_image.py`, `src/manga_viewer/bench.py`, `src/manga_viewer/cli.py`
+- Test: `tests/test_page_image.py`, `tests/test_bench.py`, `tests/test_cli.py`
 
 **Interfaces:**
 - Consumes: `PageAnalysis` (Task 1), `list_images` (Task 3), `load_glossary`, `GlossaryEntry` (Task 3), `KillOnCloseJob` (Task 4), `LlamaConfig`, `start_llama_server` (Task 5), `ChatClient` (Task 6), `Translator`, `PageTranslation`, `ContextPage` (Task 7), `Vision` (Task 8)
 - Produces:
+  - `page_image.MAX_SIDE = 1024`, `page_image.image_data_url(path: Path, max_side: int = MAX_SIDE) -> str`: 긴 변을 `max_side` 이하로 줄인 JPEG(quality 85) data URL
   - `CONTEXT_PAGES = 2`
   - `@dataclass(frozen=True) PageResult(image_path: Path, analysis: PageAnalysis, translation: PageTranslation, vision_s: float)`
-  - `@dataclass(frozen=True) BenchMeta(model_id: str, folder: Path)`
-  - `run_bench(image_paths, vision, translator, glossary, on_page=None) -> list[PageResult]`: `vision`은 `analyze(Path) -> PageAnalysis`, `translator`는 `translate_page(...)`를 가진 객체다.
+  - `@dataclass(frozen=True) BenchMeta(model_id: str, folder: Path, with_image: bool = False)`
+  - `run_bench(image_paths, vision, translator, glossary, on_page=None, with_image=False) -> list[PageResult]`: `vision`은 `analyze(Path) -> PageAnalysis`, `translator`는 `translate_page(...)`를 가진 객체다. `with_image`가 참이면 각 페이지를 `image_data_url`로 변환해 `page_image`로 넘긴다. 텍스트가 없는 페이지는 변환하지 않는다.
   - `summarize(results) -> dict` (키: `pages`, `bubbles`, `failed_bubbles`, `avg_vision_s`, `avg_llm_s`, `avg_tokens_per_second`)
   - `render_report(results, meta) -> str`
   - `write_outputs(results, meta, out_dir: Path) -> Path` (`report.html`, `results.json`을 쓰고 html 경로를 반환)
   - `cli.main(argv: list[str] | None = None) -> int`
 
 - [ ] **Step 1: 실패하는 테스트 작성**
+
+`tests/test_page_image.py`:
+
+```python
+import base64
+import io
+
+from PIL import Image
+
+from manga_viewer.page_image import image_data_url
+
+
+def decode(url):
+    header, data = url.split(",", 1)
+    assert header == "data:image/jpeg;base64"
+    return Image.open(io.BytesIO(base64.b64decode(data)))
+
+
+def test_large_image_is_downscaled_keeping_aspect(tmp_path):
+    path = tmp_path / "p.png"
+    Image.new("RGB", (1500, 3000), "white").save(path)
+    img = decode(image_data_url(path, max_side=1000))
+    assert img.size == (500, 1000)
+
+
+def test_small_image_keeps_size_and_converts_mode(tmp_path):
+    path = tmp_path / "p.png"
+    Image.new("L", (300, 200), 128).save(path)
+    img = decode(image_data_url(path))
+    assert img.size == (300, 200)
+    assert img.mode == "RGB"
+```
 
 `tests/test_bench.py`:
 
@@ -1763,8 +1846,8 @@ class FakeTranslator:
     def __init__(self):
         self.calls = []
 
-    def translate_page(self, blocks, context_pages=(), glossary=()):
-        self.calls.append({"context": list(context_pages), "glossary": list(glossary)})
+    def translate_page(self, blocks, context_pages=(), glossary=(), page_image=None):
+        self.calls.append({"context": list(context_pages), "glossary": list(glossary), "image": page_image})
         translations = {b.id: f"ko:{b.ja}" for b in blocks if b.ja != "fail"}
         failed = tuple(b.id for b in blocks if b.ja == "fail")
         return PageTranslation(translations, failed, 5, 30.0, 1.5)
@@ -1790,6 +1873,21 @@ def test_run_bench_passes_last_two_pages_as_context():
     # failed bubbles are left out of later context
     assert translator.calls[3]["context"] == [[("b", "ko:b")], [("c", "ko:c")]]
     assert translator.calls[0]["glossary"] == glossary
+    assert translator.calls[0]["image"] is None
+
+
+def test_run_bench_with_image_sends_data_url(tmp_path):
+    from PIL import Image
+
+    Image.new("RGB", (40, 40), "white").save(tmp_path / "1.png")
+    Image.new("RGB", (40, 40), "white").save(tmp_path / "2.png")
+    vision = FakeVision({"1.png": page("a"), "2.png": page()})
+    translator = FakeTranslator()
+
+    run_bench([tmp_path / "1.png", tmp_path / "2.png"], vision, translator, [], with_image=True)
+
+    assert translator.calls[0]["image"].startswith("data:image/jpeg;base64,")
+    assert translator.calls[1]["image"] is None  # no text on the page, no image encoding
 
 
 def test_summarize():
@@ -1806,10 +1904,11 @@ def test_summarize():
 def test_report_escapes_html(tmp_path):
     vision = FakeVision({"1.png": page("<script>x</script>")})
     results = run_bench([tmp_path / "1.png"], vision, FakeTranslator(), [])
-    html = render_report(results, BenchMeta(model_id="m<1>", folder=tmp_path))
+    html = render_report(results, BenchMeta(model_id="m<1>", folder=tmp_path, with_image=True))
     assert "<script>x</script>" not in html
     assert "&lt;script&gt;" in html
     assert "m&lt;1&gt;" in html
+    assert "이미지 참고" in html
 
 
 def test_write_outputs(tmp_path):
@@ -1818,7 +1917,7 @@ def test_write_outputs(tmp_path):
     html_path = write_outputs(results, BenchMeta(model_id="m", folder=tmp_path), tmp_path / "out")
     assert html_path == tmp_path / "out" / "report.html"
     data = json.loads((tmp_path / "out" / "results.json").read_text(encoding="utf-8"))
-    assert data["meta"]["model_id"] == "m"
+    assert data["meta"] == {"model_id": "m", "folder": str(tmp_path), "with_image": False}
     assert data["summary"]["pages"] == 1
     assert data["pages"][0]["bubbles"] == [{"id": 0, "box": [0, 0, 10, 10], "ja": "a", "ko": "ko:a"}]
 ```
@@ -1840,14 +1939,45 @@ def test_bench_with_empty_folder_returns_error(tmp_path, capsys):
     code = main(["bench", str(tmp_path), "--llama-server", "x.exe", "--model", "m.gguf"])
     assert code == 2
     assert "이미지가 없습니다" in capsys.readouterr().out
+
+
+def test_with_image_requires_mmproj(tmp_path, capsys):
+    (tmp_path / "1.png").write_bytes(b"")
+    code = main(["bench", str(tmp_path), "--llama-server", "x.exe", "--model", "m.gguf", "--with-image"])
+    assert code == 2
+    assert "--mmproj" in capsys.readouterr().out
 ```
 
 - [ ] **Step 2: 실패 확인**
 
-Run: `uv run pytest tests/test_bench.py tests/test_cli.py -v`
+Run: `uv run pytest tests/test_page_image.py tests/test_bench.py tests/test_cli.py -v`
 Expected: FAIL, `ModuleNotFoundError`
 
-- [ ] **Step 3: `bench.py` 구현**
+- [ ] **Step 3: `page_image.py` 구현**
+
+```python
+from __future__ import annotations
+
+import base64
+import io
+from pathlib import Path
+
+from PIL import Image
+
+# Long-side cap before sending a page to the LLM; bounds image tokens and VRAM.
+MAX_SIDE = 1024
+
+
+def image_data_url(path: Path, max_side: int = MAX_SIDE) -> str:
+    with Image.open(path) as img:
+        img = img.convert("RGB")
+        img.thumbnail((max_side, max_side))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+```
+
+- [ ] **Step 4: `bench.py` 구현**
 
 ```python
 from __future__ import annotations
@@ -1862,6 +1992,7 @@ from statistics import mean
 from typing import Callable, Iterable, Protocol, Sequence
 
 from .glossary import GlossaryEntry
+from .page_image import image_data_url
 from .translate import ContextPage, PageTranslation
 from .types import PageAnalysis, TextBlock
 
@@ -1878,6 +2009,7 @@ class PageTranslator(Protocol):
         blocks: Sequence[TextBlock],
         context_pages: Sequence[ContextPage] = ...,
         glossary: Sequence[GlossaryEntry] = ...,
+        page_image: str | None = ...,
     ) -> PageTranslation: ...
 
 
@@ -1893,6 +2025,7 @@ class PageResult:
 class BenchMeta:
     model_id: str
     folder: Path
+    with_image: bool = False
 
 
 def run_bench(
@@ -1901,6 +2034,7 @@ def run_bench(
     translator: PageTranslator,
     glossary: Sequence[GlossaryEntry],
     on_page: Callable[[PageResult], None] | None = None,
+    with_image: bool = False,
 ) -> list[PageResult]:
     results: list[PageResult] = []
     context: deque[ContextPage] = deque(maxlen=CONTEXT_PAGES)
@@ -1909,7 +2043,8 @@ def run_bench(
         analysis = vision.analyze(path)
         vision_s = time.perf_counter() - start
 
-        translation = translator.translate_page(analysis.blocks, list(context), glossary)
+        page_image = image_data_url(path) if with_image and analysis.blocks else None
+        translation = translator.translate_page(analysis.blocks, list(context), glossary, page_image)
         context.append(
             [(b.ja, translation.translations[b.id]) for b in analysis.blocks if b.id in translation.translations]
         )
@@ -1956,7 +2091,7 @@ def render_report(results: Sequence[PageResult], meta: BenchMeta) -> str:
         "img{max-width:480px;border:1px solid #ccc}table{border-collapse:collapse}"
         "td,th{border:1px solid #ccc;padding:4px 8px;vertical-align:top}.fail{background:#fdd}</style>",
         f"<h1>{esc(meta.model_id)}</h1>",
-        f"<p>{esc(str(meta.folder))}</p>",
+        f"<p>{esc(str(meta.folder))} · {'이미지 참고' if meta.with_image else '텍스트 전용'}</p>",
         "<table>" + "".join(f"<tr><th>{esc(k)}</th><td>{esc(str(v))}</td></tr>" for k, v in summary.items()) + "</table>",
     ]
     for r in results:
@@ -1980,7 +2115,7 @@ def render_report(results: Sequence[PageResult], meta: BenchMeta) -> str:
 def write_outputs(results: Sequence[PageResult], meta: BenchMeta, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     data = {
-        "meta": {"model_id": meta.model_id, "folder": str(meta.folder)},
+        "meta": {"model_id": meta.model_id, "folder": str(meta.folder), "with_image": meta.with_image},
         "summary": summarize(results),
         "pages": [_page_json(r) for r in results],
     }
@@ -1990,7 +2125,7 @@ def write_outputs(results: Sequence[PageResult], meta: BenchMeta, out_dir: Path)
     return html_path
 ```
 
-- [ ] **Step 4: `cli.py` 구현**
+- [ ] **Step 5: `cli.py` 구현**
 
 ```python
 from __future__ import annotations
@@ -2011,12 +2146,14 @@ def main(argv: list[str] | None = None) -> int:
     bench.add_argument("folder", type=Path, help="만화 이미지 폴더")
     bench.add_argument("--llama-server", type=Path, required=True, help="llama-server.exe 경로")
     bench.add_argument("--model", type=Path, required=True, help="GGUF 모델 경로")
+    bench.add_argument("--mmproj", type=Path, help="이미지 입력용 mmproj GGUF 경로")
+    bench.add_argument("--with-image", action="store_true", help="페이지 이미지를 번역 참고 자료로 함께 보냄 (--mmproj 필요)")
     bench.add_argument("--model-id", help="리포트에 표시할 모델 이름 (기본: 파일 이름)")
     bench.add_argument("--glossary", type=Path, help="용어집 TOML")
     bench.add_argument("--limit", type=int, help="앞에서부터 N장만 처리")
     bench.add_argument("--out", type=Path, default=Path("bench-out"), help="결과 폴더")
     bench.add_argument("--ctx-size", type=int, default=8192, help="LLM 컨텍스트 길이")
-    bench.add_argument("--no-think", action="store_true", help="Qwen3 같은 추론 모델의 thinking 끄기")
+    bench.add_argument("--no-think", action="store_true", help="추론(thinking) 모드가 있는 모델에서 끄기")
 
     args = parser.parse_args(argv)
     return _run_bench(args)
@@ -2026,6 +2163,9 @@ def _run_bench(args: argparse.Namespace) -> int:
     images = list_images(args.folder)[: args.limit]
     if not images:
         print(f"이미지가 없습니다: {args.folder}")
+        return 2
+    if args.with_image and args.mmproj is None:
+        print("--with-image를 쓰려면 --mmproj로 mmproj 파일 경로를 지정해야 합니다.")
         return 2
     glossary = load_glossary(args.glossary) if args.glossary else []
 
@@ -2040,7 +2180,7 @@ def _run_bench(args: argparse.Namespace) -> int:
     job = KillOnCloseJob()
     print("LLM 서버를 시작하는 중...")
     server, base_url = start_llama_server(
-        LlamaConfig(exe=args.llama_server, model=args.model, ctx_size=args.ctx_size),
+        LlamaConfig(exe=args.llama_server, model=args.model, mmproj=args.mmproj, ctx_size=args.ctx_size),
         args.out / "llama-server.log",
         job=job,
     )
@@ -2058,52 +2198,62 @@ def _run_bench(args: argparse.Namespace) -> int:
                 f"실패 {len(r.translation.failed_ids)}개"
             )
 
-        results = run_bench(images, vision, translator, glossary, on_page=report)
+        results = run_bench(images, vision, translator, glossary, on_page=report, with_image=args.with_image)
         client.close()
     finally:
         server.stop()
         job.close()
 
-    html_path = write_outputs(results, BenchMeta(model_id=args.model_id or args.model.stem, folder=args.folder), args.out)
+    meta = BenchMeta(model_id=args.model_id or args.model.stem, folder=args.folder, with_image=args.with_image)
+    html_path = write_outputs(results, meta, args.out)
     for key, value in summarize(results).items():
         print(f"{key}: {value}")
     print(f"리포트: {html_path}")
     return 0
 ```
 
-- [ ] **Step 5: 통과 확인**
+- [ ] **Step 6: 통과 확인**
 
-Run: `uv run pytest tests/test_bench.py tests/test_cli.py -v`
-Expected: 6 passed
+Run: `uv run pytest tests/test_page_image.py tests/test_bench.py tests/test_cli.py -v`
+Expected: 10 passed
 
 Run: `uv run pytest -v -m "not gpu"`
 Expected: GPU 테스트를 제외한 모든 테스트 통과
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/manga_viewer/bench.py src/manga_viewer/cli.py tests/test_bench.py tests/test_cli.py
-git commit -m "feat: add bench command with HTML and JSON reports"
+git add src/manga_viewer/page_image.py src/manga_viewer/bench.py src/manga_viewer/cli.py tests/test_page_image.py tests/test_bench.py tests/test_cli.py
+git commit -m "feat: add bench command with optional page-image context"
 ```
 
 ---
 
-### Task 10: 실제 모델 벤치마크와 기본 모델 결정
+### Task 10: Gemma 4 모델 비교와 기본 모델 결정
 
-이 태스크는 코드가 아니라 **실측과 사람의 판단**이다. 다운로드 용량이 크므로(모델당 7~9GB) 실행하는 사람이 사용자에게 먼저 확인받는다.
+이 태스크는 코드가 아니라 **실측과 사람의 판단**이다. 다운로드 용량이 수 GB 단위이므로 실행하는 사람이 사용자에게 먼저 확인받는다. 모든 명령은 개발자 PC의 PowerShell에서 직접 실행한다.
+
+비교 대상은 모델 3개 × 방식 2개, 총 6회 실행이다.
+
+| 모델 | 비고 |
+|---|---|
+| Gemma 4 E2B | 1순위. VRAM이 작아 최소 사양을 8GB로 낮출 가능성 |
+| Gemma 4 E4B | 중간 |
+| Gemma 4 12B | 기존 12GB 기준 |
+
+| 방식 | 옵션 |
+|---|---|
+| 텍스트 전용 | 없음 |
+| 이미지 참고 | `--mmproj <파일> --with-image` |
 
 **Files:**
 - Create: `docs/superpowers/notes/model-benchmark.md`
 
 **Interfaces:**
 - Consumes: `manga-viewer bench` (Task 9)
-- Produces: 기본 모델 id와 그 근거. 계획 3의 `manifest.toml`이 이 결과를 사용한다.
+- Produces: 기본 모델 id, 이미지 참고 사용 여부, 권장 최소 VRAM과 그 근거. 계획 2와 계획 3이 이 결과를 사용한다.
 
-- [ ] **Step 1: 최신 후보 확인**
-
-Hugging Face에서 12~14B급 다국어 instruct 모델 중 한국어·일본어 품질이 좋다고 알려진 최신 모델이 Gemma 3 12B나 Qwen3 14B보다 나은지 확인한다. 더 나은 후보가 있으면 사용자에게 알리고 비교 대상에 추가할지 묻는다.
-
-- [ ] **Step 2: llama.cpp CUDA 빌드 받기**
+- [ ] **Step 1: llama.cpp CUDA 빌드 받기**
 
 ```powershell
 gh release view --repo ggml-org/llama.cpp --json tagName,assets --jq '.tagName, (.assets[].name | select(test("win-cuda")))'
@@ -2118,56 +2268,88 @@ Get-ChildItem .dev\*.zip | ForEach-Object { Expand-Archive $_.FullName -Destinat
 .dev\llama\llama-server.exe --version
 ```
 
-Expected: 버전 정보와 CUDA 장치(`NVIDIA GeForce ...`)가 출력된다.
+Expected: 버전 정보와 CUDA 장치(`NVIDIA GeForce ...`)가 출력된다. Gemma 4를 지원하는 릴리스(2026년 7월 이후)여야 한다.
+
+- [ ] **Step 2: 모델 파일 이름 확인**
+
+저장소마다 제공하는 양자화 파일이 다르므로 먼저 목록을 본다. 1순위는 `ggml-org`, Q4_K_M이 없으면 `unsloth` 저장소를 쓴다.
+
+```powershell
+foreach ($repo in "ggml-org/gemma-4-E2B-it-GGUF", "ggml-org/gemma-4-E4B-it-GGUF", "ggml-org/gemma-4-12B-it-GGUF") {
+  uv run --with huggingface_hub python -c "import sys; from huggingface_hub import list_repo_files as f; print(sys.argv[1]); [print('  ', x) for x in f(sys.argv[1]) if x.endswith('.gguf')]" $repo
+}
+```
+
+저장소가 없다는 오류가 나면 Hugging Face에서 `gemma-4 <크기> it GGUF`로 검색해 정확한 저장소 이름을 찾는다. 각 모델마다 **Q4_K_M 본체 파일 1개**와 **mmproj 파일 1개**(BF16 또는 F16)를 고른다.
 
 - [ ] **Step 3: 모델 받기**
 
+모델마다 폴더를 나눠 받는다. `<repo>`, `<Q4_K_M 파일>`, `<mmproj 파일>`은 Step 2에서 고른 값으로 바꾼다.
+
 ```powershell
-uvx --from huggingface_hub hf download bartowski/google_gemma-3-12b-it-GGUF google_gemma-3-12b-it-Q4_K_M.gguf --local-dir .dev\models
-uvx --from huggingface_hub hf download Qwen/Qwen3-14B-GGUF Qwen3-14B-Q4_K_M.gguf --local-dir .dev\models
+uvx --from huggingface_hub hf download <repo> <Q4_K_M 파일> <mmproj 파일> --local-dir .dev\models\gemma-4-e2b
+uvx --from huggingface_hub hf download <repo> <Q4_K_M 파일> <mmproj 파일> --local-dir .dev\models\gemma-4-e4b
+uvx --from huggingface_hub hf download <repo> <Q4_K_M 파일> <mmproj 파일> --local-dir .dev\models\gemma-4-12b
 ```
 
 - [ ] **Step 4: 샘플 준비**
 
 사용자에게 대사가 많은 일본 만화 페이지 10~20장을 `.dev\samples\<작품명>\`에 넣어 달라고 요청한다. 커밋하지 않는다.
 
-- [ ] **Step 5: 두 모델로 bench 실행**
+- [ ] **Step 5: 6회 bench 실행**
+
+모델마다 아래 두 줄을 실행한다. `<m>`은 `gemma-4-e2b`, `gemma-4-e4b`, `gemma-4-12b`로 바꾸고, `<Q4>`와 `<mmproj>`는 그 폴더의 파일 이름으로 바꾼다.
 
 ```powershell
-uv run manga-viewer bench .dev\samples\<작품명> --llama-server .dev\llama\llama-server.exe --model .dev\models\google_gemma-3-12b-it-Q4_K_M.gguf --out bench-out\gemma3-12b
-uv run manga-viewer bench .dev\samples\<작품명> --llama-server .dev\llama\llama-server.exe --model .dev\models\Qwen3-14B-Q4_K_M.gguf --no-think --out bench-out\qwen3-14b
+uv run manga-viewer bench .dev\samples\<작품명> --llama-server .dev\llama\llama-server.exe --model .dev\models\<m>\<Q4> --model-id <m> --out bench-out\<m>-text
+uv run manga-viewer bench .dev\samples\<작품명> --llama-server .dev\llama\llama-server.exe --model .dev\models\<m>\<Q4> --mmproj .dev\models\<m>\<mmproj> --with-image --model-id <m>+image --out bench-out\<m>-image
 ```
 
-Qwen3 14B가 VRAM 부족으로 기동에 실패하면 `--ctx-size 4096`으로 다시 실행하고, 그 사실을 기록한다. 실행 중 `nvidia-smi`로 최대 VRAM 사용량을 기록한다.
+실행 중에는 다른 PowerShell 창에서 아래 명령으로 VRAM 사용량을 지켜보고 최댓값을 기록한다.
+
+```powershell
+nvidia-smi --query-gpu=memory.used --format=csv -l 1
+```
+
+기동이 VRAM 부족으로 실패하면 `--ctx-size 4096`으로 다시 실행하고 그 사실을 기록한다. 번역 결과에 추론 과정 같은 불필요한 텍스트가 섞이거나 응답이 매우 느리면 `--no-think`를 붙여 다시 실행하고 기록한다.
 
 - [ ] **Step 6: 결과 기록과 결정**
 
-두 `report.html`을 사용자에게 보여주고, 번역 품질(말투, 자연스러움, 오역)을 사용자가 판단하게 한다. 그 결과를 `docs/superpowers/notes/model-benchmark.md`에 아래 형식으로 기록한다.
+6개의 `report.html`을 사용자에게 보여주고, 번역 품질(말투, 자연스러움, 오역, 화자 파악)을 사용자가 판단하게 한다. 결과를 `docs/superpowers/notes/model-benchmark.md`에 아래 형식으로 기록한다.
 
 ```markdown
 # 번역 모델 벤치마크 (YYYY-MM-DD)
 
 - GPU: <이름, VRAM>
+- llama.cpp: <릴리스 태그>
 - 샘플: <작품명>, <N>장, 말풍선 <M>개
 
-| 모델 | 평균 비전(s) | 평균 LLM(s/페이지) | tok/s | 실패 말풍선 | 최대 VRAM | ctx |
-|---|---|---|---|---|---|---|
-| gemma-3-12b Q4_K_M | | | | | | |
-| qwen3-14b Q4_K_M | | | | | | |
+| 모델 | 방식 | 평균 비전(s) | 평균 LLM(s/페이지) | tok/s | 실패 말풍선 | 최대 VRAM | ctx |
+|---|---|---|---|---|---|---|---|
+| gemma-4-e2b | 텍스트 | | | | | | |
+| gemma-4-e2b | 이미지 | | | | | | |
+| gemma-4-e4b | 텍스트 | | | | | | |
+| gemma-4-e4b | 이미지 | | | | | | |
+| gemma-4-12b | 텍스트 | | | | | | |
+| gemma-4-12b | 이미지 | | | | | | |
 
 ## 품질 메모
 - <사용자 평가 요약>
 
 ## 결정
 - 기본 모델: <모델 id>
+- 이미지 참고: <사용 / 미사용>
+- 권장 최소 VRAM: <8GB / 12GB>
 - 이유: <한두 줄>
 ```
+
+최소 VRAM을 8GB로 낮추기로 하면 스펙(1장 대상 환경, 범위 제외 항목, 첫 실행 마법사 검사 기준)도 함께 고쳐야 한다. 이 변경은 사용자 승인을 받은 뒤 별도 커밋으로 한다.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add docs/superpowers/notes/model-benchmark.md
-git commit -m "docs: record translation model benchmark and default choice"
+git commit -m "docs: record Gemma 4 benchmark and default model choice"
 ```
 
 ---

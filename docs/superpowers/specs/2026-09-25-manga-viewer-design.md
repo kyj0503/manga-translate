@@ -91,7 +91,8 @@ PyInstaller로 exe 하나에 묶는 방식은 백신 오탐과 용량 문제 때
 | 텍스트 검출 | comic-text-detector (PyTorch) |
 | OCR | manga-ocr (PyTorch, transformers) |
 | LLM 런타임 | llama.cpp `llama-server.exe` (CUDA 빌드), 앱이 자식 프로세스로 관리 |
-| 번역 모델 | 12~14B급 GGUF Q4_K_M. 후보: Gemma 3 12B, Qwen3 14B. `bench`로 측정 후 확정 |
+| 번역 모델 | Gemma 4 제품군 GGUF Q4_K_M. 1순위 E2B, 비교 대상 E4B·12B. `bench`로 측정 후 확정 |
+| 이미지 참고 (실험) | 같은 모델의 mmproj를 `--mmproj`로 올리고 페이지 이미지를 번역 참고 자료로 전달. 박스와 원문은 항상 검출기·OCR에서 얻음. 사용 여부는 `bench`로 결정 |
 | 캐시 | SQLite |
 | 프론트엔드 | 빌드 도구 없는 순수 HTML/CSS/JS |
 | 폰트 | Noto Sans KR 등 OFL 라이선스 한국어 폰트 |
@@ -256,7 +257,7 @@ OCR과 번역을 분리 저장하므로 용어집·프롬프트·모델을 바�
 ```toml
 library_roots = ["D:\\Manga"]
 prefetch = 3
-model = "gemma-3-12b-q4_k_m"   # manifest.toml의 모델 id
+model = "gemma-4-e2b-q4_k_m"   # manifest.toml의 모델 id
 ```
 
 제거 시 설치 폴더는 삭제하고, 데이터 폴더(모델 약 10GB 포함)를 함께 지울지 묻는다.
@@ -271,6 +272,8 @@ model = "gemma-3-12b-q4_k_m"   # manifest.toml의 모델 id
 - 다운로드는 `manifest.toml`에 적힌 URL과 SHA-256이 일치할 때만 사용한다.
 
 ## 9. 테스트
+
+빌드, 실행, 테스트는 모두 개발자 PC의 네이티브 Windows에서 한다. WSL과 Docker는 쓰지 않는다.
 
 | 대상 | 방법 |
 |---|---|
@@ -289,5 +292,7 @@ model = "gemma-3-12b-q4_k_m"   # manifest.toml의 모델 id
 
 ## 10. 결정 대기 항목
 
-- 기본 번역 모델: Gemma 3 12B와 Qwen3 14B(또는 그 시점의 동급 최신 모델)를 `bench`로 비교해 확정한다.
-  구현 계획의 첫 단계로 둔다.
+- 기본 번역 모델: Gemma 4 E2B / E4B / 12B를 텍스트 전용과 이미지 참고 두 방식으로 `bench`에서 비교해 확정한다.
+- 이미지 참고 사용 여부: 같은 비교 결과로 정한다.
+- 최소 VRAM: E2B의 품질이 충분하면 12GB에서 8GB로 낮출지 검토한다. 낮추면 1장 대상 환경과 첫 실행 마법사 검사 기준을 함께 고친다.
+- 위 세 가지는 계획 1의 마지막 태스크(모델 비교)에서 정한다.
