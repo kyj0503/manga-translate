@@ -5,18 +5,17 @@ install it, write its config and run it headless. We never import its modules he
 """
 from __future__ import annotations
 
-import hashlib
 import locale
-import os
 import subprocess
-import urllib.error
-import urllib.request
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
-ENGINE_REPO = "https://github.com/dmMaze/BallonsTranslator.git"
+from .download import InstallError, check_cancel, download, extract_zip
+
 ENGINE_COMMIT = "3e401b29f72bc0b3cdad5a4d1c7fa9c6033cdcd8"
+ENGINE_ARCHIVE_URL = f"https://github.com/dmMaze/BallonsTranslator/archive/{ENGINE_COMMIT}.zip"
 TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 EXTRA_PACKAGES = (
     "transformers==4.57.6",
@@ -28,10 +27,9 @@ EXTRA_PACKAGES = (
     "tiktoken>=0.7.0",
 )
 SETUP_MARKER = ".manga-translate-setup"
-PROGRESS_EVERY = 50 * 1024 * 1024
 
 
-class EngineError(RuntimeError):
+class EngineError(InstallError):
     """Engine install or run problem; the message is shown to the user."""
 
 
@@ -81,11 +79,6 @@ MODEL_FILES: tuple[ModelFile, ...] = (
 )
 
 
-def default_engine_dir() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    return Path(base) / "manga-translate" / "BallonsTranslator"
-
-
 @dataclass(frozen=True)
 class EngineLayout:
     root: Path
@@ -127,14 +120,6 @@ def run_checked(argv: Sequence[str]) -> None:
         raise EngineError(f"명령이 실패했습니다 (코드 {result.returncode}): {' '.join(map(str, argv))}\n{tail}")
 
 
-def repo_commands(layout: EngineLayout, git: Path) -> list[list[str]]:
-    root = str(layout.root)
-    return [
-        [str(git), "-C", root, "fetch", "--depth", "1", ENGINE_REPO, ENGINE_COMMIT],
-        [str(git), "-C", root, "checkout", "--force", ENGINE_COMMIT],
-    ]
-
-
 def venv_command(layout: EngineLayout, uv: Path) -> list[str]:
     return [str(uv), "venv", "--python", "3.12", str(layout.root / ".venv")]
 
@@ -149,66 +134,36 @@ def package_commands(layout: EngineLayout, uv: Path) -> list[list[str]]:
     ]
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def download_file(url: str, dest: Path, sha256: str | None = None, log: Callable[[str], None] = print) -> None:
-    if dest.is_file() and (sha256 is None or _sha256(dest) == sha256):
-        return
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    part = dest.with_name(dest.name + ".part")
-    log(f"다운로드: {dest.name}")
-    try:
-        with urllib.request.urlopen(url, timeout=60) as response, part.open("wb") as out:
-            downloaded = 0
-            next_progress = PROGRESS_EVERY
-            chunk_size = min(1024 * 1024, PROGRESS_EVERY)
-            while True:
-                chunk = response.read(chunk_size)
-                if not chunk:
-                    break
-                out.write(chunk)
-                downloaded += len(chunk)
-                if downloaded >= next_progress:
-                    log(f"  {dest.name}: {downloaded // (1024 * 1024)}MB")
-                    next_progress += PROGRESS_EVERY
-    except (urllib.error.URLError, OSError) as e:
-        part.unlink(missing_ok=True)
-        raise EngineError(f"다운로드에 실패했습니다: {url} ({e})") from e
-    if sha256 is not None and _sha256(part) != sha256:
-        part.unlink()
-        raise EngineError(f"다운로드한 파일 검증에 실패했습니다: {dest.name}")
-    part.replace(dest)
-
-
 def setup_engine(
     layout: EngineLayout,
     *,
     uv: Path,
-    git: Path,
+    downloads_dir: Path,
     run: Callable[[Sequence[str]], None] = run_checked,
-    download: Callable[..., None] = download_file,
+    fetch: Callable[..., None] = download,
     log: Callable[[str], None] = print,
+    cancel: threading.Event | None = None,
 ) -> None:
-    """Idempotent: clone/checkout, venv and packages only when not installed; models always verified."""
-    root = str(layout.root)
-    if not (layout.root / ".git").is_dir():
-        layout.root.mkdir(parents=True, exist_ok=True)
-        run([str(git), "init", root])
+    """Idempotent: source, venv and packages only when not installed; model files always verified.
+
+    Stopping leaves the marker unwritten, so the next call picks up where this one ended.
+    """
+    check_cancel(cancel)
     if not layout.is_ready():
-        log("엔진 코드와 Python 패키지를 설치하는 중입니다. 몇 분 걸립니다...")
-        for argv in repo_commands(layout, git):
-            run(argv)
+        log("엔진 코드를 받는 중...")
+        archive = downloads_dir / f"BallonsTranslator-{ENGINE_COMMIT[:12]}.zip"
+        fetch(ENGINE_ARCHIVE_URL, archive, None, log=log, cancel=cancel)
+        extract_zip(archive, layout.root, strip_top=True, cancel=cancel)
+        archive.unlink(missing_ok=True)
+        log("엔진 Python 패키지를 설치하는 중입니다. 몇 분 걸립니다...")
         if not layout.python.is_file():
+            check_cancel(cancel)
             run(venv_command(layout, uv))
         for argv in package_commands(layout, uv):
+            check_cancel(cancel)
             run(argv)
-    log("모델 파일을 확인하는 중...")
+    log("엔진 모델 파일을 확인하는 중...")
     for model in MODEL_FILES:
-        download(model.url, layout.root / model.path, model.sha256, log)
+        fetch(model.url, layout.root / model.path, model.sha256, log=log, cancel=cancel)
+    check_cancel(cancel)
     layout.marker.write_text(ENGINE_COMMIT, encoding="utf-8")
