@@ -54,6 +54,7 @@ def _run_bench(args: argparse.Namespace) -> int:
         args.out / "llama-server.log",
         job=job,
     )
+    client = None
     try:
         print("비전 모델을 불러오는 중...")
         vision = Vision()
@@ -69,8 +70,9 @@ def _run_bench(args: argparse.Namespace) -> int:
             )
 
         results = run_bench(images, vision, translator, glossary, on_page=report, with_image=args.with_image)
-        client.close()
     finally:
+        if client is not None:
+            client.close()
         server.stop()
         job.close()
 
