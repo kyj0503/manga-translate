@@ -81,3 +81,20 @@ def test_render_page_leaves_untranslated_bubbles_alone():
     out = render_page(image, [block], {})
 
     assert out.getpixel((61, 61)) == (0, 0, 0)
+
+
+def test_render_page_skips_degenerate_blocks():
+    image = Image.new("RGB", (300, 300), "white")
+    # Draw black under the normal block area
+    ImageDraw.Draw(image).rectangle((105, 105, 175, 175), fill="black")
+
+    # Degenerate block (zero width)
+    degenerate = TextBlock(id=0, box=(50, 50, 50, 80), vertical=False, ja="x", bg_color=(128, 128, 128))
+    # Normal block
+    normal = TextBlock(id=1, box=(100, 100, 180, 180), vertical=False, ja="x", bg_color=(255, 255, 255))
+
+    # Should not raise an exception
+    out = render_page(image, [degenerate, normal], {0: "가", 1: "나"})
+
+    # Normal block was painted: its bg_color (white) is now at the corner where black was
+    assert out.getpixel((110, 110)) == (255, 255, 255)

@@ -105,6 +105,8 @@ def render_page(
         if not ko:
             continue  # failed bubble: keep the original Japanese visible
         x1, y1, x2, y2 = widen_box(block.box, out.size)
+        if x2 <= x1 or y2 <= y1:
+            continue
         draw.rectangle((x1, y1, x2 - 1, y2 - 1), fill=block.bg_color)
         pad = int(min(x2 - x1, y2 - y1) * PADDING_RATIO)
         width, height = x2 - x1 - 2 * pad, y2 - y1 - 2 * pad
