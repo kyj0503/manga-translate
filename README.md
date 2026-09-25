@@ -11,17 +11,30 @@
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - 여유 디스크 공간 약 12GB
 
-## 설치
+## 설치 (빌드)
+
+소스 폴더와 프로그램 폴더는 서로 다른 곳이어야 합니다. 아래 예시는 소스를 `%USERPROFILE%\source\manga-translate`에 받고,
+프로그램 폴더를 `%USERPROFILE%\Downloads\manga-translate`에 만듭니다.
 
 ```powershell
-git clone https://github.com/kyj0503/manga-translate.git
-cd manga-translate
+git clone https://github.com/kyj0503/manga-translate.git "$env:USERPROFILE\source\manga-translate"
+cd "$env:USERPROFILE\source\manga-translate"
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 ```
 
-`%USERPROFILE%\Downloads\manga-translate`에 프로그램 폴더가 만들어집니다. 다른 곳에 만들려면 `-Dest <폴더>`를 붙입니다.
-프로그램이 받거나 만드는 파일(엔진, llama.cpp, 모델, 설정, 번역 캐시, 로그)은 모두 이 폴더 안에만 저장됩니다.
-폴더를 지우면 전부 함께 지워집니다. 만화 폴더에는 아무것도 쓰지 않습니다.
+- 프로그램 폴더를 다른 곳에 만들려면 `-Dest <폴더>`를 붙입니다. 소스 폴더와 겹치는 위치를 지정하면 빌드가 `overlaps the source folder` 오류를 내고 멈춥니다.
+- 프로그램이 받거나 만드는 파일(엔진, llama.cpp, 모델, 설정, 번역 캐시, 로그)은 모두 프로그램 폴더 안에만 저장됩니다.
+  폴더를 지우면 전부 함께 지워집니다. 만화 폴더에는 아무것도 쓰지 않습니다.
+
+### 업데이트
+
+```powershell
+cd "$env:USERPROFILE\source\manga-translate"
+git pull
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1
+```
+
+다시 빌드하면 앱만 교체됩니다. 이미 설치한 엔진, llama.cpp, 모델, 설정, 번역 캐시는 그대로 남습니다.
 
 ## 사용법
 
@@ -52,6 +65,14 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 ```powershell
 uv sync
 uv run pytest
+```
+
+빌드하지 않고 소스에서 바로 실행할 수도 있습니다. `MANGA_TRANSLATE_HOME`을 프로그램 폴더로 지정하면 그 폴더에 설치된
+엔진, 모델, 설정을 그대로 씁니다. 지정하지 않으면 소스 폴더의 `.venv` 옆(소스 폴더 자체)을 프로그램 폴더로 씁니다.
+
+```powershell
+$env:MANGA_TRANSLATE_HOME = "$env:USERPROFILE\Downloads\manga-translate"
+uv run python -m manga_translate
 ```
 
 ## 라이선스

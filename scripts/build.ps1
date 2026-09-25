@@ -7,6 +7,13 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 
+# The program folder holds downloads and settings, so it must be separate from the source checkout.
+$destFull = [System.IO.Path]::GetFullPath($Dest).TrimEnd('\')
+$repoFull = [System.IO.Path]::GetFullPath($repo).TrimEnd('\')
+if ($destFull -ieq $repoFull -or $destFull.StartsWith("$repoFull\", [System.StringComparison]::OrdinalIgnoreCase) -or $repoFull.StartsWith("$destFull\", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "The program folder ($destFull) overlaps the source folder ($repoFull). Clone the source elsewhere or pass -Dest with another folder."
+}
+
 if (-not $Uv) {
     if ($env:UV -and (Test-Path $env:UV)) { $Uv = $env:UV }
     else { $Uv = (Get-Command uv -ErrorAction Stop).Source }
