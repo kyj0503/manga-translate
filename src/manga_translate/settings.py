@@ -12,8 +12,6 @@ PAGE_DIRECTIONS = ("rtl", "ltr")  # rtl: the next page is to the left (Japanese 
 @dataclass
 class Settings:
     model: str = ""  # a GGUF the user picked; empty means the installed default model
-    last_input: str = ""
-    last_output: str = ""
     last_library: str = ""
     page_direction: str = "rtl"
     positions: dict[str, int] = field(default_factory=dict)  # book folder -> last page index
@@ -27,7 +25,7 @@ def load_settings(path: Path) -> Settings:
     if not isinstance(data, dict):
         return Settings()
     settings = Settings()
-    for name in ("model", "last_input", "last_output", "last_library"):
+    for name in ("model", "last_library"):
         value = data.get(name)
         if isinstance(value, str):
             setattr(settings, name, value)

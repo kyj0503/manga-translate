@@ -1,11 +1,12 @@
 """Install and locate the BallonsTranslator engine (GPL-3.0).
 
-The engine does text detection, OCR, inpainting and typesetting in its own venv; we only
-install it, write its config and run it headless. We never import its modules here.
+The engine does text detection and OCR in its own venv. We install it and run
+scripts/bt_worker.py with its Python; we never import its modules here.
 """
 from __future__ import annotations
 
 import locale
+import os
 import subprocess
 import threading
 import zipfile
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from .download import InstallError, check_cancel, download, extract_zip
+from .winjob import KillOnCloseJob
 
 ENGINE_COMMIT = "3e401b29f72bc0b3cdad5a4d1c7fa9c6033cdcd8"
 ENGINE_ARCHIVE_URL = f"https://github.com/dmMaze/BallonsTranslator/archive/{ENGINE_COMMIT}.zip"
@@ -119,6 +121,52 @@ def run_checked(argv: Sequence[str]) -> None:
         output = _decode_output(result.stdout + result.stderr).strip()
         tail = "\n".join(output.splitlines()[-10:])
         raise EngineError(f"명령이 실패했습니다 (코드 {result.returncode}): {' '.join(map(str, argv))}\n{tail}")
+
+
+def run_streaming(
+    argv: Sequence[str],
+    cwd: Path,
+    *,
+    job: KillOnCloseJob | None = None,
+    on_line: Callable[[str], None] = print,
+    stdin_text: str = "exit\n",
+) -> int:
+    """Run a console program, feed stdin up front, forward its output line by line."""
+    no_proxy = "127.0.0.1,localhost"
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    for key in ("NO_PROXY", "no_proxy"):
+        existing = env.get(key)
+        env[key] = f"{existing},{no_proxy}" if existing else no_proxy
+    proc = subprocess.Popen(
+        list(argv),
+        cwd=cwd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        if job is not None:
+            job.assign(proc.pid)
+        assert proc.stdin is not None and proc.stdout is not None
+        try:
+            # Input the program needs is written up front, then stdin is closed.
+            proc.stdin.write(stdin_text.encode("utf-8"))
+            proc.stdin.close()
+        except OSError:
+            pass  # the program already exited; its output and exit code still tell the story
+        for raw in proc.stdout:
+            on_line(raw.decode("utf-8", errors="replace").rstrip("\r\n"))
+        return proc.wait()
+    except BaseException:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        raise
+    finally:
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 def venv_command(layout: EngineLayout, uv: Path) -> list[str]:

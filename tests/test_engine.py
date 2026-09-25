@@ -1,5 +1,6 @@
 import sys
 import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -16,11 +17,13 @@ from manga_translate.engine import (
     _decode_output,
     package_commands,
     run_checked,
+    run_streaming,
     setup_engine,
     venv_command,
 )
 
 UV = Path("C:/tools/uv.exe")
+PYTHON = getattr(sys, "_base_executable", sys.executable)
 
 
 def fake_fetch(calls):
@@ -181,3 +184,39 @@ def test_decode_output_handles_cp949_and_utf8(monkeypatch):
     monkeypatch.setattr("manga_translate.engine.locale.getpreferredencoding", lambda _: "cp949")
     assert _decode_output("한글 오류".encode("cp949")) == "한글 오류"
     assert _decode_output("utf8 문자".encode("utf-8")) == "utf8 문자"
+
+
+def test_run_streaming_passes_output_stdin_and_cwd(tmp_path):
+    lines = []
+    code = run_streaming(
+        [PYTHON, "-c", "import os; print('한글 출력'); print(os.getcwd()); print('got', input())"],
+        tmp_path,
+        on_line=lines.append,
+    )
+    assert code == 0
+    assert lines == ["한글 출력", str(tmp_path), "got exit"]
+
+
+def test_run_streaming_returns_exit_code(tmp_path):
+    assert run_streaming([PYTHON, "-c", "import sys; sys.exit(9)"], tmp_path, on_line=lambda l: None) == 9
+
+
+def test_run_streaming_sets_no_proxy(tmp_path):
+    lines = []
+    run_streaming(
+        [PYTHON, "-c", "import os; print(os.environ['NO_PROXY'])"],
+        tmp_path,
+        on_line=lines.append,
+    )
+    assert "127.0.0.1" in lines[0]
+    assert "localhost" in lines[0]
+
+
+def test_run_streaming_kills_process_when_consumer_fails(tmp_path):
+    def boom(line):
+        raise RuntimeError("stop")
+
+    start = time.monotonic()
+    with pytest.raises(RuntimeError, match="stop"):
+        run_streaming([PYTHON, "-c", "import time; print('x', flush=True); time.sleep(60)"], tmp_path, on_line=boom)
+    assert time.monotonic() - start < 20

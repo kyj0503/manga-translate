@@ -36,7 +36,10 @@ def test_save_settings_writes_atomically(tmp_path):
 
 def test_old_and_unknown_keys_are_ignored(tmp_path):
     path = tmp_path / "s.json"
-    path.write_text(json.dumps({"model": "m.gguf", "llama_server": "x", "engine_dir": "y", "uv": "z"}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"model": "m.gguf", "llama_server": "x", "last_input": "D:/a", "last_output": "D:/b"}),
+        encoding="utf-8",
+    )
     assert load_settings(path) == Settings(model="m.gguf")
 
 

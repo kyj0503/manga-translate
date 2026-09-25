@@ -1,7 +1,7 @@
 # AGENTS.md
 
-manga-translate는 일본 만화 이미지 폴더를 로컬 LLM으로 한국어로 번역하는 Windows GUI 프로그램입니다.
-검출·OCR·인페인팅·식자는 BallonsTranslator, 번역은 llama-server가 맡습니다. 사용법은 README.md를 봅니다.
+manga-translate는 일본 만화 이미지를 한 장씩 보여주며 로컬 LLM으로 한국어 번역을 겹쳐 보여주는 Windows 뷰어 앱입니다.
+검출·OCR은 BallonsTranslator(엔진 venv의 상주 워커), 번역은 llama-server가 맡습니다. 사용법은 README.md를 봅니다.
 
 ## 규칙
 
@@ -29,7 +29,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1
 - 실험 결과(출력 이미지, 로그, 벤치마크 기록)와 샘플 이미지는 git으로 추적하지 않는다. `bench-out/`, `manga-data/`, `.dev/`, `docs/superpowers/notes/`처럼 `.gitignore`에 있는 곳에만 둔다.
 - 빌드, 실행, 테스트는 이 PC에서 직접 한다. WSL이나 Docker는 쓰지 않는다.
 - 프로그램이 받거나 만드는 파일(엔진, llama.cpp, 모델, 설정, uv 캐시, 작업 폴더)은 모두 프로그램 폴더 안에만 둔다. `%LOCALAPPDATA%` 같은 다른 곳에 폴더를 만들지 않는다.
-- GUI 프로그램만 유지한다. CLI를 추가하지 않는다.
+- 뷰어 앱(pywebview 창)만 유지한다. CLI를 추가하지 않는다.
 - 줄바꿈은 LF를 쓴다(`.gitattributes`).
 - 커밋 작성자는 `heroria0503@gmail.com`이다(저장소 로컬 설정). 커밋 메시지에 `Co-Authored-By` 트레일러를 붙이지 않는다.
 - 주석에는 코드가 하는 일을 쓴다. "X를 제거했다" 같은 변경 이력은 쓰지 않는다.
