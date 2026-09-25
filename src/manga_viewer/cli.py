@@ -135,7 +135,11 @@ def _run_bench(args: argparse.Namespace) -> int:
             f"실패 {len(r.translation.failed_ids)}개"
         )
 
+    skipped = 0
+
     def skip(path: Path, exc: Exception) -> None:
+        nonlocal skipped
+        skipped += 1
         print(f"{path.name}: 건너뜀 ({exc})")
 
     try:
@@ -143,8 +147,11 @@ def _run_bench(args: argparse.Namespace) -> int:
             run_bench(images, vision, translator, glossary, on_page=report, with_image=args.with_image, on_error=skip)
     finally:
         if results:  # keep partial results even if the run was interrupted
-            html_path = write_outputs(results, meta, args.out)
-            for key, value in summarize(results).items():
-                print(f"{key}: {value}")
-            print(f"리포트: {html_path}")
-    return 0
+            try:
+                html_path = write_outputs(results, meta, args.out)
+                for key, value in summarize(results).items():
+                    print(f"{key}: {value}")
+                print(f"리포트: {html_path}")
+            except Exception as write_exc:  # never mask an exception already propagating
+                print(f"리포트 저장 실패: {write_exc}")
+    return 1 if skipped else 0

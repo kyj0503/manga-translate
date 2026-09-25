@@ -137,3 +137,85 @@ def test_output_survives_non_cp949_characters(tmp_path):
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env)
     assert result.returncode == 2, result.stderr.decode("utf-8", "replace")
     assert "気" in result.stdout.decode("utf-8")
+
+
+def test_returns_1_when_a_page_is_skipped(tmp_path, monkeypatch, capsys):
+    from pathlib import Path
+
+    from PIL import Image
+
+    import manga_viewer.translate
+    from manga_viewer.translate import PageTranslation
+    from manga_viewer.types import PageAnalysis
+
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    Image.new("RGB", (10, 10), "white").save(pages / "1.png")
+    Image.new("RGB", (10, 10), "white").save(pages / "2.png")
+    calls = []
+
+    class FakeVision:
+        def analyze(self, path):
+            if Path(path).name == "2.png":
+                raise OSError("broken")
+            return PageAnalysis(width=10, height=10, blocks=())
+
+    class FakeTranslator:
+        def __init__(self, client, **kwargs):
+            pass
+
+        def translate_page(self, blocks, context_pages=(), glossary=(), page_image=None):
+            return PageTranslation({}, (), 0, None, 0.0)
+
+    fake_pipeline(monkeypatch, calls, vision_factory=FakeVision)
+    monkeypatch.setattr(manga_viewer.translate, "Translator", FakeTranslator)
+
+    code = main(["bench", str(pages), *model_files(tmp_path), "--out", str(tmp_path / "out")])
+    assert code == 1
+    assert "2.png: 건너뜀" in capsys.readouterr().out
+
+
+def test_original_exception_survives_failed_report_write(tmp_path, monkeypatch, capsys):
+    from pathlib import Path
+
+    from PIL import Image
+
+    import manga_viewer.cli
+    import manga_viewer.translate
+    from manga_viewer.translate import PageTranslation
+    from manga_viewer.types import PageAnalysis
+
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    Image.new("RGB", (10, 10), "white").save(pages / "1.png")
+    Image.new("RGB", (10, 10), "white").save(pages / "2.png")
+    Image.new("RGB", (10, 10), "white").save(pages / "3.png")
+    calls = []
+
+    class FakeVision:
+        def analyze(self, path):
+            if Path(path).name == "2.png":
+                raise OSError("broken")
+            return PageAnalysis(width=10, height=10, blocks=())
+
+    class FakeTranslator:
+        def __init__(self, client, **kwargs):
+            self._calls = 0
+
+        def translate_page(self, blocks, context_pages=(), glossary=(), page_image=None):
+            self._calls += 1
+            if self._calls == 2:
+                raise RuntimeError("boom")
+            return PageTranslation({}, (), 0, None, 0.0)
+
+    fake_pipeline(monkeypatch, calls, vision_factory=FakeVision)
+    monkeypatch.setattr(manga_viewer.translate, "Translator", FakeTranslator)
+
+    def broken_write_outputs(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(manga_viewer.cli, "write_outputs", broken_write_outputs)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        main(["bench", str(pages), *model_files(tmp_path), "--out", str(tmp_path / "out")])
+    assert "리포트 저장 실패" in capsys.readouterr().out
