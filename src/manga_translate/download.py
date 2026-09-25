@@ -59,10 +59,35 @@ def download(
     start = part.stat().st_size if part.is_file() else 0
     headers = {"Range": f"bytes={start}-"} if start else {}
     log(f"다운로드: {dest.name}" + (f" ({_size_text(start)}부터 이어받기)" if start else ""))
+    expected: int | None = None
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=TIMEOUT) as response:
-            if start and response.status != 206:
+            if start and response.status == 206:
+                content_range = response.headers.get("Content-Range", "")
+                range_start = None
+                if content_range.startswith("bytes "):
+                    try:
+                        range_start = int(content_range[len("bytes "):].split("-")[0])
+                    except ValueError:
+                        range_start = None
+                if range_start == 0:
+                    start = 0  # the server sent the whole file despite the Range request
+                elif range_start != start:
+                    raise InstallError(f"다운로드 서버가 잘못된 범위를 보냈습니다: {dest.name}")
+            elif start and response.status != 206:
                 start = 0  # the server ignored Range: start over
+
+            content_length = response.headers.get("Content-Length")
+            if start and response.status == 206:
+                content_range = response.headers.get("Content-Range", "")
+                total = content_range.rsplit("/", 1)[-1] if "/" in content_range else None
+                if total and total != "*":
+                    expected = int(total)
+                elif content_length is not None:
+                    expected = start + int(content_length)
+            elif content_length is not None:
+                expected = int(content_length)
+
             with part.open("ab" if start else "wb") as out:
                 done = start
                 next_log = (done // PROGRESS_EVERY + 1) * PROGRESS_EVERY
@@ -81,10 +106,15 @@ def download(
             raise InstallError(f"다운로드에 실패했습니다: {url} ({e})") from e
     except (urllib.error.URLError, OSError) as e:
         raise InstallError(f"다운로드에 실패했습니다: {url} ({e})") from e
+    if expected is not None and done != expected:
+        raise InstallError(f"다운로드가 중간에 끊겼습니다: {dest.name} (다시 설치하면 이어받습니다)")
     if sha256 is not None and sha256_of(part) != sha256:
         part.unlink()
         raise InstallError(f"다운로드한 파일 검증에 실패했습니다: {dest.name}")
-    part.replace(dest)
+    try:
+        part.replace(dest)
+    except OSError as e:
+        raise InstallError(f"파일을 저장하지 못했습니다: {dest} ({e})") from e
 
 
 def extract_zip(
