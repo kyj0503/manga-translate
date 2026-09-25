@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from . import shared
 
-pcfg = SimpleNamespace(module=SimpleNamespace(), global_fontformat=SimpleNamespace())
+pcfg = SimpleNamespace(module=SimpleNamespace(textdetector_params={}), global_fontformat=SimpleNamespace())
 
 
 def save_config():

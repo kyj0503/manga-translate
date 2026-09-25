@@ -30,7 +30,8 @@ profile = LLMProfile(
     max_tokens=2048,
     temperature=0.1,
     top_p=1.0,
-    json_schema_response_format=False,
+    # llama-server constrains the reply to the schema, so every text block gets a translation.
+    json_schema_response_format=True,
 )
 
 config_path = root / "config" / "config.json"
@@ -54,6 +55,13 @@ m.llm_translate_context = "history"
 m.llm_translate_vision = False
 m.llm_translate_summary_memory = False
 pcfg.global_fontformat.font_family = "Malgun Gothic"
+
+ctd = dict(m.textdetector_params.get("ctd") or {})
+ctd["mask dilate size"] = 6  # also erase the white outline around the source lettering
+ctd["font size multiplier"] = 1.2
+ctd["font size min"] = 18
+ctd["font size max"] = -1
+m.textdetector_params["ctd"] = ctd
 
 if not save_config():
     sys.exit("config save failed")

@@ -54,7 +54,14 @@ def test_config_script_writes_text_only_local_llm_config(tmp_path):
     assert profile["model"] == "gemma-4-e4b"
     assert profile["support_vision"] is False
     assert profile["thinking_level"] == "Disabled"
+    assert profile["json_schema_response_format"] is True
     assert data["font_family"] == "Malgun Gothic"
+    assert module["textdetector_params"]["ctd"] == {
+        "mask dilate size": 6,
+        "font size multiplier": 1.2,
+        "font size min": 18,
+        "font size max": -1,
+    }
 
 
 def test_headless_argv(tmp_path):
