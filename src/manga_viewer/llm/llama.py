@@ -11,13 +11,12 @@ from .process import ManagedServer, free_port
 class LlamaConfig:
     exe: Path
     model: Path
-    mmproj: Path | None = None  # vision projector; required for image input
     ctx_size: int = 8192
     n_gpu_layers: int = 999
 
 
 def build_llama_args(cfg: LlamaConfig, port: int) -> list[str]:
-    args = [
+    return [
         str(cfg.exe),
         "-m", str(cfg.model),
         "--host", "127.0.0.1",
@@ -25,10 +24,8 @@ def build_llama_args(cfg: LlamaConfig, port: int) -> list[str]:
         "-c", str(cfg.ctx_size),
         "-ngl", str(cfg.n_gpu_layers),
         "--parallel", "1",
+        "--reasoning-budget", "0",  # translation needs no thinking; it only costs time
     ]
-    if cfg.mmproj is not None:
-        args += ["--mmproj", str(cfg.mmproj)]
-    return args
 
 
 def start_llama_server(

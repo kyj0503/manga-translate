@@ -195,3 +195,15 @@ def test_download_http_error_is_engine_error(tmp_path, http_server):
     base, _, _ = http_server
     with pytest.raises(EngineError, match="다운로드"):
         download_file(base + "/missing", tmp_path / "x.bin", None, log=lambda m: None)
+
+
+def test_run_checked_success_and_failure_tail():
+    import sys
+
+    from manga_viewer.engine import run_checked
+
+    run_checked([sys.executable, "-c", "print('fine')"])
+    with pytest.raises(EngineError) as info:
+        run_checked([sys.executable, "-c", "import sys; print('boom'); sys.exit(3)"])
+    assert "코드 3" in str(info.value)
+    assert "boom" in str(info.value)

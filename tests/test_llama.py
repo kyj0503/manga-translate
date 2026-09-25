@@ -14,14 +14,5 @@ def test_build_llama_args():
     assert "-c 8192" in joined
     assert "-ngl 999" in joined
     assert "--parallel 1" in joined
+    assert "--reasoning-budget 0" in joined
     assert "--mmproj" not in args
-
-
-def test_build_llama_args_with_mmproj():
-    cfg = LlamaConfig(
-        exe=Path("C:/x/llama-server.exe"),
-        model=Path("C:/m/model.gguf"),
-        mmproj=Path("C:/m/mmproj.gguf"),
-    )
-    args = build_llama_args(cfg, port=5555)
-    assert args[args.index("--mmproj") + 1] == str(Path("C:/m/mmproj.gguf"))

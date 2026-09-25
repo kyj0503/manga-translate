@@ -110,9 +110,12 @@ class EngineLayout:
 
 
 def run_checked(argv: Sequence[str]) -> None:
-    result = subprocess.run(list(argv))
+    """Run a helper command without a console window; on failure show the end of its output."""
+    result = subprocess.run(list(argv), capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
     if result.returncode != 0:
-        raise EngineError(f"명령이 실패했습니다 (코드 {result.returncode}): {' '.join(argv)}")
+        output = (result.stdout + result.stderr).decode("utf-8", errors="replace").strip()
+        tail = "\n".join(output.splitlines()[-10:])
+        raise EngineError(f"명령이 실패했습니다 (코드 {result.returncode}): {' '.join(map(str, argv))}\n{tail}")
 
 
 def repo_commands(layout: EngineLayout, git: Path) -> list[list[str]]:
