@@ -119,11 +119,16 @@ def run_translation(
             report(sum(1 for p in result_dir.iterdir() if p.is_file()))
 
     report(0)
-    with _llama_server(req, work / "llama-server.log", on_log) as (job, base_url):
-        on_log("번역 설정을 쓰는 중...")
-        write_engine_config(req.engine, base_url, req.model.stem)
-        on_log(f"번역을 시작합니다 ({total}장)...")
-        code = run_streaming(headless_argv(req.engine, exec_dir), req.engine.root, job=job, on_line=forward)
+    code = None
+    try:
+        with _llama_server(req, work / "llama-server.log", on_log) as (job, base_url):
+            on_log("번역 설정을 쓰는 중...")
+            write_engine_config(req.engine, base_url, req.model.stem)
+            on_log(f"번역을 시작합니다 ({total}장)...")
+            code = run_streaming(headless_argv(req.engine, exec_dir), req.engine.root, job=job, on_line=forward)
+    except Exception:
+        on_log(f"작업 폴더: {work}")
+        raise
 
     saved = collect_results(exec_dir, req.output_dir)
     missing = missing_pages(images, saved)

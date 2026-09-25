@@ -146,3 +146,22 @@ def test_server_start_failure(tmp_path, fakes):
     with pytest.raises(PipelineError, match="LLM 서버를 시작하지 못했습니다"):
         run_translation(request(tmp_path, "1.jpg"), on_log=lambda l: None)
     assert calls == ["job.close"]
+
+
+def test_config_failure_keeps_work_and_logs(tmp_path, fakes, monkeypatch):
+    from manga_viewer.engine import EngineError
+
+    calls, _, work = fakes
+    logs = []
+
+    def failing_config(layout, base_url, model_id, run=None):
+        raise EngineError("config failed")
+
+    monkeypatch.setattr(pipeline, "write_engine_config", failing_config)
+
+    with pytest.raises(EngineError, match="config failed"):
+        run_translation(request(tmp_path, "1.jpg"), on_log=logs.append)
+
+    assert work.exists()
+    assert any(f"작업 폴더: {work}" in log for log in logs)
+    assert calls[-2:] == ["server.stop", "job.close"]

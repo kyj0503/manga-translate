@@ -207,3 +207,17 @@ def test_run_checked_success_and_failure_tail():
         run_checked([sys.executable, "-c", "import sys; print('boom'); sys.exit(3)"])
     assert "코드 3" in str(info.value)
     assert "boom" in str(info.value)
+
+
+def test_decode_output_handles_cp949_and_utf8(monkeypatch):
+    from manga_viewer.engine import _decode_output
+
+    monkeypatch.setattr("manga_viewer.engine.locale.getpreferredencoding", lambda _: "cp949")
+
+    # Test cp949 encoding fallback
+    cp949_text = "한글 오류".encode("cp949")
+    assert _decode_output(cp949_text) == "한글 오류"
+
+    # Test UTF-8 encoding (should work without fallback)
+    utf8_text = "utf8 문자".encode("utf-8")
+    assert _decode_output(utf8_text) == "utf8 문자"

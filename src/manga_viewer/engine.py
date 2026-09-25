@@ -6,6 +6,7 @@ install it, write its config and run it headless. We never import its modules he
 from __future__ import annotations
 
 import hashlib
+import locale
 import os
 import shutil
 import subprocess
@@ -109,11 +110,19 @@ class EngineLayout:
         return installed == ENGINE_COMMIT and self.python.is_file()
 
 
+def _decode_output(data: bytes) -> str:
+    """Decode output trying UTF-8 first, then fall back to system locale encoding."""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode(locale.getpreferredencoding(False), errors="replace")
+
+
 def run_checked(argv: Sequence[str]) -> None:
     """Run a helper command without a console window; on failure show the end of its output."""
     result = subprocess.run(list(argv), capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
     if result.returncode != 0:
-        output = (result.stdout + result.stderr).decode("utf-8", errors="replace").strip()
+        output = _decode_output(result.stdout + result.stderr).strip()
         tail = "\n".join(output.splitlines()[-10:])
         raise EngineError(f"명령이 실패했습니다 (코드 {result.returncode}): {' '.join(map(str, argv))}\n{tail}")
 
