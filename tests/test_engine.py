@@ -54,7 +54,7 @@ def test_is_ready_needs_matching_marker_and_python(tmp_path):
 def test_commands(tmp_path):
     layout = EngineLayout(tmp_path)
     repo = repo_commands(layout, GIT)
-    assert repo[0] == [str(GIT), "-C", str(tmp_path), "fetch", "--depth", "1", "origin", ENGINE_COMMIT]
+    assert repo[0] == [str(GIT), "-C", str(tmp_path), "fetch", "--depth", "1", ENGINE_REPO, ENGINE_COMMIT]
     assert repo[1] == [str(GIT), "-C", str(tmp_path), "checkout", "--force", ENGINE_COMMIT]
     assert venv_command(layout, UV) == [str(UV), "venv", "--python", "3.12", str(tmp_path / ".venv")]
     packages = [" ".join(c) for c in package_commands(layout, UV)]
@@ -93,10 +93,9 @@ def test_fresh_setup_runs_everything_and_writes_marker(tmp_path):
     )
 
     assert ran[0] == [str(GIT), "init", str(root)]
-    assert ran[1] == [str(GIT), "-C", str(root), "remote", "add", "origin", ENGINE_REPO]
-    assert ran[2:4] == repo_commands(layout, GIT)
-    assert ran[4] == venv_command(layout, UV)
-    assert ran[5:] == package_commands(layout, UV)
+    assert ran[1:3] == repo_commands(layout, GIT)
+    assert ran[3] == venv_command(layout, UV)
+    assert ran[4:] == package_commands(layout, UV)
     assert downloaded == [root / f.path for f in MODEL_FILES]
     assert layout.marker.read_text(encoding="utf-8") == ENGINE_COMMIT
 
@@ -126,6 +125,17 @@ def test_existing_venv_is_not_recreated(tmp_path):
     setup_engine(layout, uv=UV, git=GIT, run=ran.append, download=lambda *a: None, log=lambda m: None)
     assert venv_command(layout, UV) not in ran
     assert ran[:2] == repo_commands(layout, GIT)
+
+
+def test_interrupted_clone_recovers(tmp_path):
+    root = tmp_path / "engine"
+    layout = EngineLayout(root)
+    (root / ".git").mkdir(parents=True)
+    ran = []
+    setup_engine(layout, uv=UV, git=GIT, run=ran.append, download=lambda *a: None, log=lambda m: None)
+    assert ran[:2] == repo_commands(layout, GIT)
+    assert not any("remote" in " ".join(argv) for argv in ran)
+    assert layout.marker.read_text(encoding="utf-8") == ENGINE_COMMIT
 
 
 @pytest.fixture

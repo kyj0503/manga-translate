@@ -118,7 +118,7 @@ def run_checked(argv: Sequence[str]) -> None:
 def repo_commands(layout: EngineLayout, git: Path) -> list[list[str]]:
     root = str(layout.root)
     return [
-        [str(git), "-C", root, "fetch", "--depth", "1", "origin", ENGINE_COMMIT],
+        [str(git), "-C", root, "fetch", "--depth", "1", ENGINE_REPO, ENGINE_COMMIT],
         [str(git), "-C", root, "checkout", "--force", ENGINE_COMMIT],
     ]
 
@@ -177,7 +177,6 @@ def setup_engine(
     if not (layout.root / ".git").is_dir():
         layout.root.mkdir(parents=True, exist_ok=True)
         run([str(git), "init", root])
-        run([str(git), "-C", root, "remote", "add", "origin", ENGINE_REPO])
     if not layout.is_ready():
         log("엔진 코드와 Python 패키지를 설치하는 중입니다. 몇 분 걸립니다...")
         for argv in repo_commands(layout, git):
