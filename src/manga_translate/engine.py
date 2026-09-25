@@ -164,6 +164,7 @@ def setup_engine(
             run(argv)
     log("엔진 모델 파일을 확인하는 중...")
     for model in MODEL_FILES:
+        check_cancel(cancel)
         fetch(model.url, layout.root / model.path, model.sha256, log=log, cancel=cancel)
     check_cancel(cancel)
     layout.marker.write_text(ENGINE_COMMIT, encoding="utf-8")

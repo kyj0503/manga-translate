@@ -124,6 +124,21 @@ def test_cancel_before_start(tmp_path):
     assert not layout.marker.exists()
 
 
+def test_cancel_during_model_verification(tmp_path):
+    layout = make_ready(tmp_path / "engine")
+    cancel = threading.Event()
+    fetched = []
+
+    def fetch(url, dest, sha256=None, *, log=print, cancel=None):
+        fetched.append((url, dest, sha256))
+        cancel.set()  # the user presses 중단 while the first model is verified
+
+    with pytest.raises(Cancelled):
+        setup_engine(layout, uv=UV, downloads_dir=tmp_path / "dl", run=lambda a: None,
+                     fetch=fetch, log=lambda m: None, cancel=cancel)
+    assert len(fetched) == 1
+
+
 def test_cancel_between_package_steps(tmp_path):
     layout = EngineLayout(tmp_path / "engine")
     cancel = threading.Event()
