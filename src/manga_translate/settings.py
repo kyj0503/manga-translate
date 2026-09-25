@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -43,5 +44,8 @@ def load_settings(path: Path) -> Settings:
 
 
 def save_settings(settings: Settings, path: Path) -> None:
+    """Write via a temp file and rename, so a reader never sees a partial or torn write."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2), encoding="utf-8")
+    temp = path.with_name(path.name + ".tmp")
+    temp.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temp, path)

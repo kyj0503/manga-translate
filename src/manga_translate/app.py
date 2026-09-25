@@ -129,6 +129,7 @@ class AppState:
         self._runtime_factory = runtime_factory
         self.settings = load_settings(layout.settings_path)
         self._lock = threading.Lock()
+        self._settings_lock = threading.Lock()  # guards settings mutation + save against concurrent API calls
         self.task: str | None = None
         self.cancel = threading.Event()
         self.task_job: KillOnCloseJob | None = None
@@ -145,6 +146,7 @@ class AppState:
     # --- state ---
 
     def _save(self) -> None:
+        """Save ``self.settings``. Callers must hold ``self._settings_lock``."""
         save_settings(self.settings, self.layout.settings_path)
 
     def _log(self, line: str) -> None:
@@ -297,8 +299,9 @@ class AppState:
             raise ApiError(409, "번역 엔진이 실행 중일 때는 모델을 바꿀 수 없습니다.")
         path = self.dialogs.pick_model()
         if path:
-            self.settings.model = path
-            self._save()
+            with self._settings_lock:
+                self.settings.model = path
+                self._save()
         return self.state()
 
     # --- library ---
@@ -312,8 +315,9 @@ class AppState:
         if path:
             root = Path(path)
             self._load_library(root)
-            self.settings.last_library = str(root)
-            self._save()
+            with self._settings_lock:
+                self.settings.last_library = str(root)
+                self._save()
         return self.library_json()
 
     def library_json(self) -> dict:
@@ -372,15 +376,17 @@ class AppState:
 
     def save_position(self, book_id: int, index: int) -> dict:
         book, _ = self._page(book_id, index)
-        self.settings.positions[str(book.dir)] = index
-        self._save()
+        with self._settings_lock:
+            self.settings.positions[str(book.dir)] = index
+            self._save()
         return {}
 
     def set_page_direction(self, value: str) -> dict:
         if value not in PAGE_DIRECTIONS:
             raise ApiError(400, f"넘기는 방향 값이 올바르지 않습니다: {value}")
-        self.settings.page_direction = value
-        self._save()
+        with self._settings_lock:
+            self.settings.page_direction = value
+            self._save()
         return self.state()
 
     def shutdown(self) -> None:

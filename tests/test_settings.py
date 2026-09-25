@@ -26,6 +26,14 @@ def test_missing_or_corrupt_file_gives_defaults(tmp_path):
     assert load_settings(not_object) == Settings()
 
 
+def test_save_settings_writes_atomically(tmp_path):
+    path = tmp_path / "settings.json"
+    settings = Settings(last_library="D:/만화", positions={"D:/만화/1권": 3})
+    save_settings(settings, path)
+    assert load_settings(path) == settings
+    assert list(tmp_path.iterdir()) == [path]  # no leftover .tmp file
+
+
 def test_old_and_unknown_keys_are_ignored(tmp_path):
     path = tmp_path / "s.json"
     path.write_text(json.dumps({"model": "m.gguf", "llama_server": "x", "engine_dir": "y", "uv": "z"}), encoding="utf-8")

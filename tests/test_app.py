@@ -339,6 +339,43 @@ def test_save_position_and_page_direction(tmp_path):
     assert error.value.status == 400
 
 
+def test_concurrent_save_position_is_thread_safe(tmp_path):
+    book_count = 8
+    pages_per_book = 50
+    root = tmp_path / "만화"
+    for b in range(book_count):
+        folder = root / f"book{b:02d}"
+        folder.mkdir(parents=True)
+        for p in range(pages_per_book):
+            (folder / f"{p:03d}.png").write_bytes(b"x")
+
+    layout = AppLayout(tmp_path / "app")
+    state = AppState(layout, FakeDialogs(folder=str(root)), runtime_factory=FakeRuntime)
+    state.open_library()
+    assert len(state.books) == book_count
+
+    errors: list[Exception] = []
+
+    def worker(book_id: int) -> None:
+        try:
+            for index in range(pages_per_book):
+                state.save_position(book_id, index)
+        except Exception as e:  # pragma: no cover - only hit on a real race
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(b,)) for b in range(book_count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+        assert not t.is_alive()
+
+    assert errors == []
+    loaded = load_settings(layout.settings_path)
+    for book in state.books:
+        assert loaded.positions[str(book.dir)] == pages_per_book - 1
+
+
 def test_routes_cover_the_api(tmp_path):
     routes = build_routes(AppState(AppLayout(tmp_path), FakeDialogs(), runtime_factory=FakeRuntime))
     assert set(routes) == {
