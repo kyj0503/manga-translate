@@ -1,6 +1,7 @@
 """Which page to translate next: the page on screen first, then the next few, then the one before."""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import Callable, Sequence
 from .cache import TranslationCache
 from .page import PageResult
 from .translate import CONTEXT_PAGES
+
+logger = logging.getLogger(__name__)
 
 
 def process_page(
@@ -110,6 +113,7 @@ class Scheduler:
                 self._process(pages, index)
             except Exception as e:
                 error = str(e) or type(e).__name__
+                logger.exception("페이지 처리 실패: %s", pages[index])
             with self._cond:
                 if error is not None:
                     self._failed[pages[index]] = error

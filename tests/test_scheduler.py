@@ -1,3 +1,4 @@
+import logging
 import threading
 from pathlib import Path
 
@@ -79,6 +80,21 @@ def test_failed_page_is_not_retried_until_asked():
         scheduler.retry(PAGES, 5)
         assert scheduler.wait_idle(10)
         assert order[0] == 5
+    finally:
+        scheduler.stop()
+
+
+def test_failed_page_is_logged_with_a_traceback(caplog):
+    order, process, is_done = recorder(fail={5})
+    scheduler = Scheduler(process, is_done)
+    try:
+        with caplog.at_level(logging.ERROR, logger="manga_translate.scheduler"):
+            scheduler.focus(PAGES, 5)
+            assert scheduler.wait_idle(10)
+        records = [r for r in caplog.records if r.name == "manga_translate.scheduler"]
+        assert len(records) == 1
+        assert "p5" in records[0].message
+        assert records[0].exc_info is not None
     finally:
         scheduler.stop()
 

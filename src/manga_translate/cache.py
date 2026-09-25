@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 from .page import PageResult
@@ -53,4 +54,13 @@ class TranslationCache:
         entry = self._entry(source)
         temp = entry.with_suffix(".tmp")
         temp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.replace(temp, entry)
+        attempts = 5
+        for attempt in range(attempts):
+            try:
+                os.replace(temp, entry)
+                return
+            except PermissionError:
+                # a poll thread may have the entry open for reading (Windows) right now; retry briefly.
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(0.05)

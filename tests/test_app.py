@@ -1,13 +1,16 @@
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
 
+import manga_translate.app as app_module
 import manga_translate.components as components
 from manga_translate.app import (
     AppState,
+    Runtime,
     build_routes,
     component_status_text,
     effective_model,
@@ -80,6 +83,10 @@ class FakeRuntime:
         self.cache = TranslationCache(layout.cache_dir, model.name)
         self.scheduler = FakeScheduler()
         self.closed = False
+        self.alive_value = True
+
+    def alive(self):
+        return self.alive_value
 
     def close(self):
         self.closed = True
@@ -229,6 +236,82 @@ def test_start_needs_everything_installed(tmp_path, small_model):
     with pytest.raises(ApiError) as error:
         state.start()
     assert error.value.status == 409
+
+
+def test_state_reports_runtime_error_when_the_server_died(tmp_path, small_model):
+    layout = AppLayout(tmp_path)
+    install_all(layout)
+    state = AppState(layout, FakeDialogs(), runtime_factory=FakeRuntime)
+    state.start()
+    wait_task(state)
+    assert state.state()["runtime"] == "ready"
+
+    state.runtime.alive_value = False
+    data = state.state()
+    assert data["runtime"] == "error"
+    assert "다시 시작" in data["error"]
+    assert data["can_start"] is True  # "시작" must be usable to restart
+
+
+def test_start_restarts_a_dead_runtime_and_closes_the_old_one(tmp_path, small_model):
+    layout = AppLayout(tmp_path)
+    install_all(layout)
+    state = AppState(layout, FakeDialogs(), runtime_factory=FakeRuntime)
+    state.start()
+    wait_task(state)
+    old_runtime = state.runtime
+    old_runtime.alive_value = False
+
+    state.start()
+    wait_task(state)
+
+    assert old_runtime.closed is True
+    assert state.runtime is not old_runtime
+    assert state.state()["runtime"] == "ready"
+
+
+def test_start_is_a_no_op_while_the_runtime_is_alive(tmp_path, small_model):
+    layout = AppLayout(tmp_path)
+    install_all(layout)
+    state = AppState(layout, FakeDialogs(), runtime_factory=FakeRuntime)
+    state.start()
+    wait_task(state)
+    live_runtime = state.runtime
+
+    state.start()
+
+    assert state.runtime is live_runtime
+    assert live_runtime.closed is False
+
+
+def test_runtime_close_kills_the_job_before_waiting_on_worker_and_server():
+    order = []
+
+    class FakeJob:
+        def close(self):
+            order.append("job")
+
+    class FakeWorker:
+        def stop(self):
+            order.append("worker")
+
+    class FakeServer:
+        def stop(self):
+            order.append("server")
+
+    class FakeSched:
+        def stop(self):
+            order.append("scheduler")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime._job = FakeJob()
+    runtime._worker = FakeWorker()
+    runtime._server = FakeServer()
+    runtime.scheduler = FakeSched()
+
+    runtime.close()
+
+    assert order == ["scheduler", "job", "worker", "server"]
 
 
 def test_pick_model(tmp_path, small_model):
@@ -401,3 +484,45 @@ def test_route_arguments_are_validated(tmp_path):
     with pytest.raises(ApiError) as error:
         routes[("GET", "/api/image")]({"book": "x", "index": "0"})
     assert error.value.status == 400
+
+
+# --- startup failures (main), no window ---
+
+
+def test_main_reports_an_appstate_failure_via_message_box(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "app_dir", lambda: tmp_path)
+    monkeypatch.setattr(app_module, "uv_environment", lambda layout: {})  # keep the real env untouched
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace())
+    boxes = []
+    monkeypatch.setattr(app_module, "_show_startup_error", boxes.append)
+
+    def broken_appstate(*args, **kwargs):
+        raise RuntimeError("상태를 만들지 못했습니다")
+
+    monkeypatch.setattr(app_module, "AppState", broken_appstate)
+
+    assert app_module.main() == 1
+
+    assert len(boxes) == 1
+    assert "상태를 만들지 못했습니다" in boxes[0]
+    assert str(tmp_path / "logs") in boxes[0]
+    log_text = (tmp_path / "logs" / "app.log").read_text(encoding="utf-8")
+    assert "Traceback" in log_text
+
+
+def test_main_reports_a_reset_logs_failure_via_message_box(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "app_dir", lambda: tmp_path)
+    monkeypatch.setattr(app_module, "uv_environment", lambda layout: {})  # keep the real env untouched
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace())
+    boxes = []
+    monkeypatch.setattr(app_module, "_show_startup_error", boxes.append)
+
+    def broken_reset_logs(logs_dir):
+        raise PermissionError("다른 인스턴스가 로그 파일을 쓰고 있습니다")
+
+    monkeypatch.setattr(app_module, "reset_logs", broken_reset_logs)
+
+    assert app_module.main() == 1
+
+    assert len(boxes) == 1
+    assert "다른 인스턴스가 로그 파일을 쓰고 있습니다" in boxes[0]

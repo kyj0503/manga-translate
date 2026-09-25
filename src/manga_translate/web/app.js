@@ -55,6 +55,10 @@ async function refreshState() {
   }
   if (!$("setup").hidden) renderSetup();
   renderReaderInfo();
+  if (!$("reader").hidden && appState.runtime === "error") {
+    stopPolling();
+    setStatus("번역 엔진 오류", true);
+  }
   if (appState.runtime === "ready" && (location.hash === "" || location.hash === "#/")) {
     location.hash = "#/library";
   }
@@ -312,7 +316,7 @@ function rightToLeft() {
 }
 
 document.addEventListener("keydown", (event) => {
-  if ($("reader").hidden || event.target.tagName === "SELECT") return;
+  if ($("reader").hidden || ["INPUT", "BUTTON", "SELECT"].includes(event.target.tagName)) return;
   if (event.key === "t" || event.key === "T") {
     $("overlay-toggle").checked = !$("overlay-toggle").checked;
     drawOverlay();

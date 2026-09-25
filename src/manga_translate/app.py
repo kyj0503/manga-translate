@@ -1,6 +1,7 @@
 """The viewer app: install components, run the translation engine, and serve books to the window."""
 from __future__ import annotations
 
+import ctypes
 import logging
 import os
 import secrets
@@ -113,11 +114,15 @@ class Runtime:
             is_done=lambda page: self.cache.get(page) is not None,
         )
 
+    def alive(self) -> bool:
+        """Whether the translation server is still up. The worker restarts itself, so it doesn't count."""
+        return self._server.running
+
     def close(self) -> None:
         self.scheduler.stop()
+        self._job.close()  # kill llama-server and the worker right away, even if a scan is hung
         self._worker.stop()
         self._server.stop()
-        self._job.close()
 
 
 class AppState:
@@ -166,7 +171,7 @@ class AppState:
     def can_start(self) -> bool:
         return (
             self.task is None
-            and self.runtime is None
+            and (self.runtime is None or not self.runtime.alive())
             and self._ready("engine")
             and self._ready("llama")
             and effective_model(self.layout, self.settings) is not None
@@ -179,14 +184,19 @@ class AppState:
             ready = self._ready(key)
             status = model_status_text(self.layout, self.settings) if key == "model" else component_status_text(ready, size)
             rows.append({"key": key, "label": label, "ready": ready, "status": status})
+        runtime_status = self.runtime_status
+        error = self.error
+        if self.runtime is not None and not self.runtime.alive():
+            runtime_status = "error"
+            error = "번역 엔진이 멈췄습니다. 다시 시작해 주세요."
         return {
             "components": rows,
             "model": model.stem if model else "",
             "task": self.task,
             "log": list(self.log),
             "message": self.message,
-            "error": self.error,
-            "runtime": self.runtime_status,
+            "error": error,
+            "runtime": runtime_status,
             "can_start": self.can_start(),
             "languages": LANGUAGES,
             "page_direction": self.settings.page_direction,
@@ -274,7 +284,7 @@ class AppState:
         return self.state()
 
     def start(self) -> dict:
-        if self.runtime is not None:
+        if self.runtime is not None and self.runtime.alive():
             return self.state()
         model = effective_model(self.layout, self.settings)
         if not self.can_start() or model is None:
@@ -283,6 +293,9 @@ class AppState:
         def work() -> str:
             job = KillOnCloseJob()
             self.task_job = job
+            dead_runtime, self.runtime = self.runtime, None
+            if dead_runtime is not None:
+                dead_runtime.close()  # the server died; release its handles before starting a fresh one
             self.runtime_status = "starting"
             self._log("번역 엔진과 LLM 서버를 시작하는 중... (처음에는 1분 정도 걸릴 수 있습니다)")
             try:
@@ -455,30 +468,47 @@ def reset_logs(logs_dir: Path) -> None:
         (logs_dir / name).unlink(missing_ok=True)
 
 
+def _show_startup_error(message: str) -> None:
+    """Report a fatal startup error with a message box: the app runs under pythonw, with no console."""
+    ctypes.windll.user32.MessageBoxW(None, message, TITLE, 0x10)  # MB_ICONERROR
+
+
 def main() -> int:
     import webview
 
     layout = AppLayout(app_dir())
     os.environ.update(uv_environment(layout))  # keep uv's cache and Python inside the program folder
-    reset_logs(layout.logs_dir)
-    logging.basicConfig(
-        filename=str(layout.logs_dir / "app.log"),
-        encoding="utf-8",
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    dialogs = WindowDialogs()
-    state = AppState(layout, dialogs)
-    if state.can_start():
-        state.start()
-    token = secrets.token_urlsafe(24)
-    server = make_server(build_routes(state), token, WEB_DIR)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{server.server_address[1]}/?token={token}"
-    dialogs.window = webview.create_window(TITLE, url, width=1280, height=900, min_size=(800, 600))
+    logging_configured = False
+    state = None
     try:
-        webview.start()
+        reset_logs(layout.logs_dir)
+        logging.basicConfig(
+            filename=str(layout.logs_dir / "app.log"),
+            encoding="utf-8",
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            force=True,  # each run gets its own app.log, even if logging was already configured
+        )
+        logging_configured = True
+        dialogs = WindowDialogs()
+        state = AppState(layout, dialogs)
+        if state.can_start():
+            state.start()
+        token = secrets.token_urlsafe(24)
+        server = make_server(build_routes(state), token, WEB_DIR)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{server.server_address[1]}/?token={token}"
+        dialogs.window = webview.create_window(TITLE, url, width=1280, height=900, min_size=(800, 600))
+        try:
+            webview.start()
+        finally:
+            server.shutdown()
+        return 0
+    except Exception as e:
+        if logging_configured:
+            logger.exception("실행 중 예상하지 못한 오류로 종료합니다.")
+        _show_startup_error(f"실행 중 예상하지 못한 오류로 종료합니다.\n\n{e}\n\n로그 폴더: {layout.logs_dir}")
+        return 1
     finally:
-        server.shutdown()
-        state.shutdown()  # closing the Job Objects ends llama-server, the worker and any install
-    return 0
+        if state is not None:
+            state.shutdown()  # closing the Job Objects ends llama-server, the worker and any install

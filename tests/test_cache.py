@@ -1,5 +1,8 @@
 import os
 
+import pytest
+
+import manga_translate.cache as cache_module
 from manga_translate.cache import TranslationCache
 from manga_translate.page import Block, PageResult
 
@@ -56,3 +59,38 @@ def test_corrupt_entry_is_a_miss(tmp_path):
 def test_missing_source_is_a_miss(tmp_path):
     cache = TranslationCache(tmp_path / "cache", "gemma.gguf")
     assert cache.get(tmp_path / "없음.png") is None
+
+
+def test_put_retries_past_a_transient_permission_error(tmp_path, monkeypatch):
+    source = make_source(tmp_path)
+    cache = TranslationCache(tmp_path / "cache", "gemma.gguf")
+    real_replace = os.replace
+    calls = []
+
+    def flaky_replace(src, dst):
+        calls.append((src, dst))
+        if len(calls) <= 2:
+            raise PermissionError("파일이 사용 중입니다")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(cache_module.os, "replace", flaky_replace)
+    monkeypatch.setattr(cache_module.time, "sleep", lambda seconds: None)
+
+    cache.put(source, RESULT)
+
+    assert len(calls) == 3
+    assert cache.get(source) == RESULT
+
+
+def test_put_gives_up_after_repeated_permission_errors(tmp_path, monkeypatch):
+    source = make_source(tmp_path)
+    cache = TranslationCache(tmp_path / "cache", "gemma.gguf")
+
+    def always_fails(src, dst):
+        raise PermissionError("파일이 사용 중입니다")
+
+    monkeypatch.setattr(cache_module.os, "replace", always_fails)
+    monkeypatch.setattr(cache_module.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(PermissionError):
+        cache.put(source, RESULT)
