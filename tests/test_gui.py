@@ -117,15 +117,25 @@ def test_build_request(tmp_path, small_model):
 
 def test_summary_text():
     ok = TranslationResult(2, [Path("o/1.png"), Path("o/2.png")], [], 0, None)
-    assert summary_text(ok, Path("D:/out")) == "2 / 2장을 번역했습니다.\n저장 위치: D:\\out"
-    partial = TranslationResult(2, [Path("o/1.png")], [Path("i/2.png")], 9, Path("C:/tmp/w"))
-    text = summary_text(partial, Path("D:/out"))
+    assert summary_text(ok, Path("D:/out"), Path("D:/in")) == "2 / 2장을 번역했습니다.\n저장 위치: D:\\out"
+    partial = TranslationResult(2, [Path("D:/in/2.png")], [Path("D:/in/sub/2.png")], 9, Path("C:/tmp/w"))
+    text = summary_text(partial, Path("D:/out"), Path("D:/in"))
     assert "1 / 2장을 번역했습니다." in text
-    assert "결과가 없는 페이지: 2.png" in text
+    assert "결과가 없는 페이지: sub/2.png" in text
     assert "작업 폴더: C:\\tmp\\w" in text
     assert "엔진이 오류로 끝났습니다 (코드 9). 로그를 확인하세요." in text
-    stopped = TranslationResult(3, [Path("o/1.png")], [Path("i/2.png"), Path("i/3.png")], -1, None, cancelled=True)
-    assert summary_text(stopped, Path("D:/out")) == "1 / 3장 저장 후 중단했습니다.\n저장 위치: D:\\out"
+    stopped = TranslationResult(
+        3, [Path("D:/in/1.png")], [Path("D:/in/2.png"), Path("D:/in/3.png")], -1, None, cancelled=True
+    )
+    assert (
+        summary_text(stopped, Path("D:/out"), Path("D:/in")) == "1 / 3장 저장 후 중단했습니다.\n저장 위치: D:\\out"
+    )
+
+
+def test_summary_text_missing_page_outside_input_dir_falls_back_to_name():
+    result = TranslationResult(1, [], [Path("C:/elsewhere/2.png")], 0, None)
+    text = summary_text(result, Path("D:/out"), Path("D:/in"))
+    assert "결과가 없는 페이지: 2.png" in text
 
 
 def test_make_runner_streams_and_raises():

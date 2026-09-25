@@ -105,13 +105,21 @@ def build_request(layout: AppLayout, settings: Settings, input_dir: str, output_
     )
 
 
-def summary_text(result: TranslationResult, output_dir: Path) -> str:
+def _relative_page_name(path: Path, input_dir: Path) -> str:
+    try:
+        return path.relative_to(input_dir).as_posix()
+    except ValueError:
+        return path.name
+
+
+def summary_text(result: TranslationResult, output_dir: Path, input_dir: Path) -> str:
     done = result.total - len(result.missing)
     if result.cancelled:
         return f"{done} / {result.total}장 저장 후 중단했습니다.\n저장 위치: {output_dir}"
     lines = [f"{done} / {result.total}장을 번역했습니다.", f"저장 위치: {output_dir}"]
     if result.missing:
-        lines.append("결과가 없는 페이지: " + ", ".join(p.name for p in result.missing))
+        names = ", ".join(_relative_page_name(p, input_dir) for p in result.missing)
+        lines.append("결과가 없는 페이지: " + names)
     if result.work_dir is not None:
         lines.append(f"작업 폴더: {result.work_dir}")
     if result.engine_exit_code != 0:
@@ -132,6 +140,7 @@ class App:
         self.running = False
         self.cancel = threading.Event()
         self.task_job: KillOnCloseJob | None = None
+        self.input_dir: Path | None = None
         self.output_dir: Path | None = None
 
         root.title(TITLE)
@@ -318,6 +327,7 @@ class App:
         self.settings.last_input = str(req.input_dir)
         self.settings.last_output = str(req.output_dir)
         self._save()
+        self.input_dir = req.input_dir
         self.output_dir = req.output_dir
         self.bar.configure(maximum=1, value=0)
         self.progress_var.set(format_progress(0, 0))
@@ -365,7 +375,7 @@ class App:
                     self._finish()
                     result = event[1]
                     show = messagebox.showinfo if result.ok or result.cancelled else messagebox.showwarning
-                    show(TITLE, summary_text(result, self.output_dir))
+                    show(TITLE, summary_text(result, self.output_dir, self.input_dir))
                 elif kind == "cancelled":
                     self._finish()
                     self._append_log("중단했습니다. 다시 누르면 이어서 진행합니다.")

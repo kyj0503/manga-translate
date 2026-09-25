@@ -12,16 +12,15 @@ from typing import Callable, Iterator
 from .download import check_cancel
 from .engine import EngineLayout
 from .engine_run import (
-    collect_results,
+    collect_staged_results,
     headless_argv,
-    missing_pages,
-    prepare_work_dir,
     run_streaming,
+    stage_pages,
     write_engine_config,
 )
 from .llm.llama import LlamaConfig, start_llama_server
 from .llm.process import ServerStartError
-from .source import list_images
+from .source import find_images
 from .winjob import KillOnCloseJob
 
 SOURCE_LANGUAGE = "일본어"
@@ -61,16 +60,16 @@ class TranslationResult:
 def validate(req: TranslationRequest) -> list[Path]:
     if not req.input_dir.is_dir():
         raise PipelineError(f"폴더가 없습니다: {req.input_dir}")
-    images = list_images(req.input_dir)
+    if req.output_dir.resolve() == req.input_dir.resolve():
+        raise PipelineError("출력 폴더는 입력 폴더와 달라야 합니다.")
+    images = find_images(req.input_dir, exclude=req.output_dir)
     if not images:
-        raise PipelineError(f"이미지가 없습니다: {req.input_dir}")
+        raise PipelineError(f"이미지가 없습니다 (하위 폴더 포함): {req.input_dir}")
     for label, path in (("llama-server", req.llama_server), ("모델", req.model)):
         if not path.is_file():
             raise PipelineError(f"{label} 파일이 없습니다: {path}")
     if not req.engine.is_ready():
         raise PipelineError("번역 엔진이 설치되어 있지 않습니다. 창의 '번역 엔진' 줄에서 '설치'를 먼저 눌러 주세요.")
-    if req.output_dir.resolve() == req.input_dir.resolve():
-        raise PipelineError("출력 폴더는 입력 폴더와 달라야 합니다.")
     return images
 
 
@@ -150,8 +149,9 @@ def run_translation(
 
     report(0)
     code = -1
+    staged: list = []
     try:
-        prepare_work_dir(images, exec_dir)
+        staged = stage_pages(images, req.input_dir, exec_dir)
         with _llama_server(req, work / "llama-server.log", on_log, cancel) as (job, base_url):
             check_cancel(cancel)
             on_log("번역 설정을 쓰는 중...")
@@ -164,8 +164,7 @@ def run_translation(
             on_log(f"작업 폴더: {work}")
             raise
 
-    saved = collect_results(exec_dir, req.output_dir)
-    missing = missing_pages(images, saved)
+    saved, missing = collect_staged_results(exec_dir, req.output_dir, staged)
     report(total - len(missing))
     if _stopped(cancel):
         on_log("번역을 중단했습니다.")

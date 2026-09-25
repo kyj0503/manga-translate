@@ -10,11 +10,11 @@ import pytest
 from manga_translate.engine import EngineLayout
 from manga_translate.engine_run import (
     CONFIG_SCRIPT,
-    collect_results,
+    StagedPage,
+    collect_staged_results,
     headless_argv,
-    missing_pages,
-    prepare_work_dir,
     run_streaming,
+    stage_pages,
     write_engine_config,
 )
 
@@ -64,7 +64,7 @@ def test_headless_argv(tmp_path):
     ]
 
 
-def test_prepare_collect_and_missing(tmp_path):
+def test_stage_pages_top_level_relative_dir_is_dot(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     images = []
@@ -73,16 +73,64 @@ def test_prepare_collect_and_missing(tmp_path):
         images.append(src / name)
     exec_dir = tmp_path / "work" / "pages"
 
-    prepare_work_dir(images, exec_dir)
-    assert (exec_dir / "1.jpg").read_bytes() == b"1.jpg"
+    staged = stage_pages(images, src, exec_dir)
 
-    assert collect_results(exec_dir, tmp_path / "out") == []
+    assert staged == [
+        StagedPage(src / "1.jpg", "00001_1.jpg", Path(".")),
+        StagedPage(src / "2.png", "00002_2.png", Path(".")),
+    ]
+    assert (exec_dir / "00001_1.jpg").read_bytes() == b"1.jpg"
+    assert (exec_dir / "00002_2.png").read_bytes() == b"2.png"
+
+
+def test_collect_staged_results_top_level(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    images = [src / "1.jpg", src / "2.png"]
+    for image in images:
+        image.write_bytes(b"img")
+    exec_dir = tmp_path / "work" / "pages"
+    staged = stage_pages(images, src, exec_dir)
+
+    assert collect_staged_results(exec_dir, tmp_path / "out", staged) == ([], [src / "1.jpg", src / "2.png"])
+
     (exec_dir / "result").mkdir()
-    (exec_dir / "result" / "1.png").write_bytes(b"typeset")
-    results = collect_results(exec_dir, tmp_path / "out")
-    assert results == [tmp_path / "out" / "1.png"]
+    (exec_dir / "result" / "00001_1.png").write_bytes(b"typeset")
+    saved, missing = collect_staged_results(exec_dir, tmp_path / "out", staged)
+
+    assert saved == [tmp_path / "out" / "1.png"]
     assert (tmp_path / "out" / "1.png").read_bytes() == b"typeset"
-    assert missing_pages(images, results) == [src / "2.png"]
+    assert missing == [src / "2.png"]
+
+
+def test_stage_pages_avoids_name_collisions_across_subfolders(tmp_path):
+    src = tmp_path / "src"
+    (src / "a").mkdir(parents=True)
+    (src / "b").mkdir(parents=True)
+    (src / "a" / "001.webp").write_bytes(b"a")
+    (src / "b" / "001.webp").write_bytes(b"b")
+    images = [src / "a" / "001.webp", src / "b" / "001.webp"]
+    exec_dir = tmp_path / "work" / "pages"
+
+    staged = stage_pages(images, src, exec_dir)
+
+    assert staged == [
+        StagedPage(src / "a" / "001.webp", "00001_001.webp", Path("a")),
+        StagedPage(src / "b" / "001.webp", "00002_001.webp", Path("b")),
+    ]
+    assert (exec_dir / "00001_001.webp").read_bytes() == b"a"
+    assert (exec_dir / "00002_001.webp").read_bytes() == b"b"
+
+    (exec_dir / "result").mkdir()
+    (exec_dir / "result" / "00001_001.png").write_bytes(b"a-out")
+    (exec_dir / "result" / "00002_001.png").write_bytes(b"b-out")
+
+    saved, missing = collect_staged_results(exec_dir, tmp_path / "out", staged)
+
+    assert missing == []
+    assert saved == [tmp_path / "out" / "a" / "001.png", tmp_path / "out" / "b" / "001.png"]
+    assert (tmp_path / "out" / "a" / "001.png").read_bytes() == b"a-out"
+    assert (tmp_path / "out" / "b" / "001.png").read_bytes() == b"b-out"
 
 
 def test_run_streaming_passes_output_stdin_and_cwd(tmp_path):

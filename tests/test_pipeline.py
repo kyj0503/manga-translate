@@ -67,10 +67,14 @@ def fakes(tmp_path, monkeypatch):
         calls.append(("run", argv[1:4]))
         result = exec_dir / "result"
         result.mkdir()
+        staged_files = sorted(p.name for p in exec_dir.iterdir() if p.is_file())
         if state["produce"] is None:
-            names = sorted(p.name for p in exec_dir.iterdir() if p.is_file())
+            names = staged_files
         else:
-            names = state["produce"]
+            # state["produce"] names the original source files whose staged copy should
+            # get a result; the staged name is "<NNNNN>_<original name>".
+            wanted = set(state["produce"])
+            names = [name for name in staged_files if name.split("_", 1)[1] in wanted]
         for name in names:
             (result / f"{Path(name).stem}.png").write_bytes(b"typeset")
             on_line(f"saved {name}")
@@ -122,6 +126,40 @@ def test_validate_rejects_bad_requests(tmp_path):
         validate(request(tmp_path, "1.jpg", output_dir=tmp_path / "in"))
 
 
+def test_validate_error_message_for_tree_with_no_images(tmp_path):
+    empty = tmp_path / "empty"
+    (empty / "sub").mkdir(parents=True)
+    (empty / "sub" / "notes.txt").write_bytes(b"x")
+    with pytest.raises(PipelineError, match=r"이미지가 없습니다 \(하위 폴더 포함\)"):
+        validate(request(tmp_path, "1.jpg", input_dir=empty))
+
+
+def test_validate_ignores_files_inside_output_folder_nested_in_input(tmp_path):
+    nested_out = tmp_path / "in" / "out"
+    req = request(tmp_path, "1.jpg", output_dir=nested_out)
+    nested_out.mkdir()
+    (nested_out / "leftover.png").write_bytes(b"x")
+
+    images = validate(req)
+
+    assert images == [req.input_dir / "1.jpg"]
+
+
+def test_successful_run_with_subfolder_mirrors_output(tmp_path, fakes):
+    req = request(tmp_path, "1.jpg")
+    sub = req.input_dir / "1권"
+    sub.mkdir()
+    (sub / "2.webp").write_bytes(b"img")
+    (sub / "1.webp").write_bytes(b"img")
+
+    result = run_translation(req, on_log=lambda l: None)
+
+    assert result.ok and result.total == 3
+    saved_relative = sorted(p.relative_to(req.output_dir).as_posix() for p in result.saved)
+    assert saved_relative == ["1.png", "1권/1.png", "1권/2.png"]
+    assert (req.output_dir / "1권" / "1.png").read_bytes() == b"typeset"
+
+
 def test_successful_run(tmp_path, fakes):
     calls, _, work, _ = fakes
     logs, progress = [], []
@@ -133,7 +171,7 @@ def test_successful_run(tmp_path, fakes):
     assert [p.name for p in result.saved] == ["1.png", "2.png"]
     assert (tmp_path / "out" / "1.png").read_bytes() == b"typeset"
     assert progress == [(0, 2), (1, 2), (2, 2)]
-    assert "saved 1.jpg" in logs
+    assert "saved 00001_1.jpg" in logs
     assert ("config", "http://127.0.0.1:5555", "gemma-4-e4b") in calls
     assert ("run", ["-m", "ballontranslator", "--headless"]) in calls
     assert calls[-2:] == ["server.stop", "job.close"]
@@ -170,14 +208,14 @@ def test_server_start_failure(tmp_path, fakes):
     assert calls == ["job.close"]
 
 
-def test_prepare_work_dir_failure_logs_work_dir(tmp_path, fakes, monkeypatch):
+def test_stage_pages_failure_logs_work_dir(tmp_path, fakes, monkeypatch):
     _, _, work, _ = fakes
     logs = []
 
-    def failing_prepare(images, exec_dir):
+    def failing_stage(images, root, exec_dir):
         raise OSError("copy failed")
 
-    monkeypatch.setattr(pipeline, "prepare_work_dir", failing_prepare)
+    monkeypatch.setattr(pipeline, "stage_pages", failing_stage)
 
     with pytest.raises(OSError, match="copy failed"):
         run_translation(request(tmp_path, "1.jpg"), on_log=logs.append)

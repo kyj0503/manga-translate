@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -26,30 +27,58 @@ def headless_argv(layout: EngineLayout, exec_dir: Path) -> list[str]:
     return [str(layout.python), "-m", "ballontranslator", "--headless", "--exec_dirs", str(exec_dir)]
 
 
-def prepare_work_dir(images: Sequence[Path], exec_dir: Path) -> None:
-    """The engine writes project files next to the images, so it works on copies."""
+@dataclass(frozen=True)
+class StagedPage:
+    source: Path
+    staged_name: str
+    relative_dir: Path
+
+
+def stage_pages(images: Sequence[Path], root: Path, exec_dir: Path) -> list[StagedPage]:
+    """Copy images into one flat, numbered folder so the engine sees them in reading order.
+
+    The engine writes project files next to the images, so it works on copies. Numbering
+    the copies keeps the engine's filename order equal to our order, which keeps its
+    page-to-page context in reading order. Numbering also keeps names unique when images
+    from different subfolders share a name.
+    """
     exec_dir.mkdir(parents=True, exist_ok=True)
-    for image in images:
-        shutil.copy2(image, exec_dir / image.name)
+    staged = []
+    for i, src in enumerate(images):
+        staged_name = f"{i + 1:05d}_{src.name}"
+        shutil.copy2(src, exec_dir / staged_name)
+        staged.append(StagedPage(src, staged_name, src.parent.relative_to(root)))
+    return staged
 
 
-def collect_results(exec_dir: Path, output_dir: Path) -> list[Path]:
+def collect_staged_results(
+    exec_dir: Path, output_dir: Path, staged: Sequence[StagedPage]
+) -> tuple[list[Path], list[Path]]:
+    """Move staged results back to their mirrored place in ``output_dir``.
+
+    Returns (saved output paths, missing source paths) for pages the engine did not
+    write a result for.
+    """
     result_dir = exec_dir / "result"
-    if not result_dir.is_dir():
-        return []
-    output_dir.mkdir(parents=True, exist_ok=True)
-    copied = []
-    for path in sorted(result_dir.iterdir()):
-        if path.is_file():
-            target = output_dir / path.name
-            shutil.copy2(path, target)
-            copied.append(target)
-    return copied
+    result_by_stem = {}
+    if result_dir.is_dir():
+        for path in result_dir.iterdir():
+            if path.is_file():
+                result_by_stem[Path(path.name).stem] = path
 
-
-def missing_pages(images: Sequence[Path], results: Sequence[Path]) -> list[Path]:
-    produced = {p.stem for p in results}
-    return [p for p in images if p.stem not in produced]
+    saved = []
+    missing = []
+    for page in staged:
+        result_file = result_by_stem.get(Path(page.staged_name).stem)
+        if result_file is None:
+            missing.append(page.source)
+            continue
+        target_dir = output_dir / page.relative_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{page.source.stem}{result_file.suffix}"
+        shutil.copy2(result_file, target)
+        saved.append(target)
+    return saved, missing
 
 
 def run_streaming(
